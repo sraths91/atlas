@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Atlas - Test Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+            font-family: monospace;
+        }
+        #display {
+            border: 2px solid #0f0;
+            max-width: 320px;
+        }
+        #console {
+            margin-top: 20px;
+            background: #000;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            border: 1px solid #333;
+            font-size: 12px;
+        }
+        .log {
+            margin: 2px 0;
+            color: #0f0;
+        }
+        .error {
+            color: #f00;
+        }
+        .info {
+            color: #0ff;
+        }
+    </style>
+</head>
+<body>
+    <h1>Atlas - Debug Test</h1>
+    <p>Updates: <span id="updates">0</span> | Loaded: <span id="loaded">0</span> | Status: <span id="status">Starting...</span></p>
+    <img id="display" src="http://localhost:8765/preview?t=0" alt="Display">
+    
+    <h2>Console Log:</h2>
+    <div id="console"></div>
+    
+    <script>
+        let updateCount = 0;
+        let loadCount = 0;
+        const consoleDiv = document.getElementById('console');
+        
+        function log(message, type = 'log') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            consoleDiv.appendChild(div);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateDisplay() {
+            const img = document.getElementById('display');
+            const timestamp = Date.now();
+            updateCount++;
+            document.getElementById('updates').textContent = updateCount;
+            document.getElementById('status').textContent = '🟢 Fetching...';
+            
+            log('Fetching image #' + updateCount, 'info');
+            
+            fetch('http://localhost:8765/preview?t=' + timestamp, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            })
+            .then(response => {
+                log('Response: ' + response.status + ' (' + response.headers.get('content-length') + ' bytes)', 'info');
+                return response.blob();
+            })
+            .then(blob => {
+                const oldSrc = img.src;
+                const newSrc = URL.createObjectURL(blob);
+                
+                log('Created blob URL: ' + newSrc.substring(0, 50) + '...', 'log');
+                
+                img.onload = function() {
+                    if (oldSrc.startsWith('blob:')) {
+                        URL.revokeObjectURL(oldSrc);
+                    }
+                    loadCount++;
+                    document.getElementById('loaded').textContent = loadCount;
+                    document.getElementById('status').textContent = '✅ Loaded';
+                    log('Image loaded successfully #' + loadCount, 'log');
+                };
+                
+                img.onerror = function() {
+                    log('Image load error!', 'error');
+                    document.getElementById('status').textContent = '❌ Error';
+                };
+                
+                img.src = newSrc;
+            })
+            .catch(error => {
+                log('Fetch error: ' + error, 'error');
+                document.getElementById('status').textContent = '❌ Error';
+            });
+        }
+        
+        // Start updates
+        log('Starting auto-refresh (1000ms interval)', 'info');
+        setInterval(updateDisplay, 1000);
+        updateDisplay();
+    </script>
+</body>
+</html>

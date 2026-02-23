@@ -1,0 +1,6 @@
+include README.md
+include requirements.txt
+include LICENSE
+recursive-include fleet_agent *.py
+recursive-include resources *
+recursive-include scripts *

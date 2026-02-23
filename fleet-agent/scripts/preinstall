@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# Pre-installation script for Fleet Agent
+#
+
+set -e
+
+LOG_FILE="/var/log/fleet-agent-install.log"
+
+echo "$(date): Fleet Agent pre-installation started" >> "$LOG_FILE"
+
+# Stop existing agent if running
+LAUNCHDAEMON="/Library/LaunchDaemons/com.fleet.agent.plist"
+if [ -f "$LAUNCHDAEMON" ]; then
+    echo "Stopping existing Fleet Agent service..." >> "$LOG_FILE"
+    launchctl unload "$LAUNCHDAEMON" 2>/dev/null || true
+fi
+
+# Kill any running fleet-agent processes
+pkill -f fleet-agent 2>/dev/null || true
+
+echo "$(date): Fleet Agent pre-installation completed" >> "$LOG_FILE"
+
+exit 0

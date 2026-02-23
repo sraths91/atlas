@@ -1,0 +1,8 @@
+{
+    "server_url": "https://YOUR_SERVER_IP:8768",
+    "api_key": "YOUR_API_KEY",
+    "encryption_key": null,
+    "verify_ssl": true,
+    "interval": 10,
+    "machine_id": null
+}

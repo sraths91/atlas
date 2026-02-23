@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Service identification -->
+    <key>Label</key>
+    <string>com.atlas.agent</string>
+    
+    <!-- Program to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/python3</string>
+        <string>-m</string>
+        <string>atlas.live_widgets</string>
+        <string>--port</string>
+        <string>8767</string>
+        <string>--fleet-server</string>
+        <string>https://localhost:8768</string>
+    </array>
+    
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/samraths/CascadeProjects/windsurf-project-2</string>
+    
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/samraths/CascadeProjects/windsurf-project-2</string>
+    </dict>
+    
+    <!-- Auto-restart configuration -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart if it crashes -->
+        <key>SuccessfulExit</key>
+        <false/>
+        <!-- Restart if it exits abnormally -->
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    
+    <!-- Start at boot -->
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <!-- Restart throttle (wait 10 seconds before restarting) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <!-- Standard output/error logging -->
+    <key>StandardOutPath</key>
+    <string>/var/log/atlas-agent.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/var/log/atlas-agent-error.log</string>
+    
+    <!-- User to run as -->
+    <key>UserName</key>
+    <string>samraths</string>
+    
+    <!-- Process type -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <!-- Nice level (lower priority) -->
+    <key>Nice</key>
+    <integer>5</integer>
+    
+    <!-- Prevent throttling on frequent restarts -->
+    <key>EnableGlobbing</key>
+    <false/>
+    
+    <!-- Exit timeout -->
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+</dict>
+</plist>

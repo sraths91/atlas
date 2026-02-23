@@ -1,0 +1,771 @@
+openapi: 3.0.3
+info:
+  title: ATLAS Fleet Monitoring Platform API
+  version: 2.0.0
+  description: |
+    REST API for the ATLAS Fleet Monitoring Platform.
+
+    The platform provides centralized monitoring and management of macOS devices
+    with features including:
+    - Real-time system metrics collection
+    - Fleet-wide dashboard and analytics
+    - Remote command execution
+    - Health monitoring and alerting
+    - End-to-end encryption support
+
+  contact:
+    name: ATLAS Fleet Monitoring
+  license:
+    name: MIT
+
+servers:
+  - url: https://localhost:8768/api/fleet
+    description: Local development server
+  - url: https://fleet.example.com/api/fleet
+    description: Production server
+
+tags:
+  - name: Agent
+    description: Agent reporting and command retrieval endpoints
+  - name: Dashboard
+    description: Dashboard data and machine listing endpoints
+  - name: Admin
+    description: Administrative endpoints (user management, certificates, etc.)
+  - name: Authentication
+    description: Authentication and session management
+
+security:
+  - sessionAuth: []
+  - apiKeyAuth: []
+
+paths:
+  # ============================================================================
+  # AGENT ENDPOINTS
+  # ============================================================================
+
+  /report:
+    post:
+      tags:
+        - Agent
+      summary: Agent system report
+      description: |
+        Agent submits system information and metrics to the server.
+        This is the primary reporting endpoint called by agents.
+      operationId: agentReport
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentReport'
+      responses:
+        '200':
+          description: Report accepted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  message:
+                    type: string
+                    example: Report received
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /commands/{machine_id}:
+    get:
+      tags:
+        - Agent
+      summary: Get pending commands
+      description: |
+        Agent retrieves pending commands from the server.
+        Commands are queued by administrators and executed by agents.
+      operationId: getPendingCommands
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          description: Machine identifier
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of commands to return
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of pending commands
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commands:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Command'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /commands/{machine_id}/{command_id}/ack:
+    post:
+      tags:
+        - Agent
+      summary: Acknowledge command execution
+      description: |
+        Agent acknowledges that a command has been executed.
+        The command is removed from the queue after acknowledgment.
+      operationId: acknowledgeCommand
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: command_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [success, failed, timeout]
+                result:
+                  type: string
+                  description: Command execution result or error message
+                executed_at:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Command acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # DASHBOARD ENDPOINTS
+  # ============================================================================
+
+  /machines:
+    get:
+      tags:
+        - Dashboard
+      summary: List all machines
+      description: |
+        Get list of all registered machines with current status and metrics.
+        Status is automatically updated based on last seen timestamp.
+      operationId: listMachines
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by machine status
+          schema:
+            type: string
+            enum: [online, warning, offline]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of machines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  machines:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Machine'
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /machines/{machine_id}:
+    get:
+      tags:
+        - Dashboard
+      summary: Get machine details
+      description: Get detailed information about a specific machine
+      operationId: getMachineDetails
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Machine details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Machine'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /machines/{machine_id}/history:
+    get:
+      tags:
+        - Dashboard
+      summary: Get machine metrics history
+      description: Get historical metrics for a specific machine
+      operationId: getMachineHistory
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Number of historical entries to return
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: Metrics history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MetricsHistoryEntry'
+
+  /summary:
+    get:
+      tags:
+        - Dashboard
+      summary: Get fleet summary
+      description: |
+        Get fleet-wide summary statistics including:
+        - Total machines and status breakdown
+        - Average resource usage
+        - Critical alerts
+      operationId: getFleetSummary
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: Fleet summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetSummary'
+
+  # ============================================================================
+  # ADMIN ENDPOINTS
+  # ============================================================================
+
+  /admin/users:
+    get:
+      tags:
+        - Admin
+      summary: List users
+      description: Get list of all users (admin only)
+      operationId: listUsers
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags:
+        - Admin
+      summary: Create user
+      description: Create a new user account (admin only)
+      operationId: createUser
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                password:
+                  type: string
+                  minLength: 12
+                  description: Must contain uppercase, lowercase, digit, and special character
+                role:
+                  type: string
+                  enum: [admin, user]
+                  default: user
+      responses:
+        '201':
+          description: User created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/commands:
+    post:
+      tags:
+        - Admin
+      summary: Queue command for machine
+      description: Add a command to a machine's command queue
+      operationId: queueCommand
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - machine_id
+                - command_type
+              properties:
+                machine_id:
+                  type: string
+                command_type:
+                  type: string
+                  enum: [restart, update, collect_logs, run_script]
+                parameters:
+                  type: object
+                  description: Command-specific parameters
+      responses:
+        '201':
+          description: Command queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  command_id:
+                    type: string
+                  status:
+                    type: string
+                    example: queued
+
+  # ============================================================================
+  # AUTHENTICATION ENDPOINTS
+  # ============================================================================
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and create session
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  session_token:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate current session
+      operationId: logout
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: Logout successful
+
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session_token
+      description: Session-based authentication for web dashboard
+
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key authentication for agents
+
+  schemas:
+    AgentReport:
+      type: object
+      required:
+        - machine_id
+        - machine_info
+        - metrics
+      properties:
+        machine_id:
+          type: string
+          description: Unique machine identifier
+        machine_info:
+          $ref: '#/components/schemas/MachineInfo'
+        metrics:
+          $ref: '#/components/schemas/Metrics'
+        encrypted:
+          type: boolean
+          description: Whether payload is E2EE encrypted
+          default: false
+
+    MachineInfo:
+      type: object
+      properties:
+        hostname:
+          type: string
+        os:
+          type: string
+          example: Darwin
+        os_version:
+          type: string
+          example: 14.1.0
+        architecture:
+          type: string
+          example: arm64
+        processor:
+          type: string
+          example: Apple M1
+        cpu_count:
+          type: integer
+        cpu_threads:
+          type: integer
+        total_memory:
+          type: integer
+          format: int64
+          description: Total RAM in bytes
+
+    Metrics:
+      type: object
+      properties:
+        cpu:
+          type: object
+          properties:
+            percent:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 100
+            per_core:
+              type: array
+              items:
+                type: number
+                format: float
+        memory:
+          type: object
+          properties:
+            percent:
+              type: number
+              format: float
+            used:
+              type: integer
+              format: int64
+            available:
+              type: integer
+              format: int64
+            total:
+              type: integer
+              format: int64
+        disk:
+          type: object
+          properties:
+            percent:
+              type: number
+              format: float
+            used:
+              type: integer
+              format: int64
+            free:
+              type: integer
+              format: int64
+            total:
+              type: integer
+              format: int64
+        network:
+          type: object
+          properties:
+            bytes_sent:
+              type: integer
+              format: int64
+            bytes_recv:
+              type: integer
+              format: int64
+            packets_sent:
+              type: integer
+            packets_recv:
+              type: integer
+
+    Machine:
+      type: object
+      properties:
+        machine_id:
+          type: string
+        info:
+          $ref: '#/components/schemas/MachineInfo'
+        status:
+          type: string
+          enum: [online, warning, offline]
+          description: |
+            - online: seen in last 30 seconds
+            - warning: seen 30-60 seconds ago
+            - offline: not seen in 60+ seconds
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        latest_metrics:
+          $ref: '#/components/schemas/Metrics'
+        health_check:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [reachable, unreachable, timeout, unhealthy, error]
+            last_check:
+              type: string
+              format: date-time
+            latency_ms:
+              type: integer
+            error:
+              type: string
+
+    MetricsHistoryEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        metrics:
+          $ref: '#/components/schemas/Metrics'
+
+    FleetSummary:
+      type: object
+      properties:
+        total_machines:
+          type: integer
+        online:
+          type: integer
+        warning:
+          type: integer
+        offline:
+          type: integer
+        avg_cpu:
+          type: number
+          format: float
+        avg_memory:
+          type: number
+          format: float
+        avg_disk:
+          type: number
+          format: float
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        timestamp:
+          type: string
+          format: date-time
+
+    Alert:
+      type: object
+      properties:
+        machine_id:
+          type: string
+        type:
+          type: string
+          enum: [cpu, memory, disk]
+        severity:
+          type: string
+          enum: [critical, warning]
+        message:
+          type: string
+          example: "CPU usage at 95.0%"
+
+    Command:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [restart, update, collect_logs, run_script]
+        parameters:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        username:
+          type: string
+        role:
+          type: string
+          enum: [admin, user]
+        created_at:
+          type: string
+          format: date-time
+        last_login:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Invalid request parameters
+
+    Unauthorized:
+      description: Unauthorized - authentication required
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Authentication required
+
+    Forbidden:
+      description: Forbidden - insufficient permissions
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Admin privileges required
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Resource not found
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Internal server error

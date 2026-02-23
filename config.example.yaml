@@ -1,0 +1,247 @@
+# ATLAS Fleet Monitoring Platform - Example Configuration File
+#
+# This file shows all available configuration options with their default values.
+# Copy this to ~/.fleet-config/config.yaml and uncomment/modify the values you want to override.
+#
+# Format: YAML (preferred) or JSON
+# Location: ~/.fleet-config/config.yaml or ~/.fleet-config/config.json
+#
+# All settings are optional - defaults will be used if not specified.
+# Environment variables take precedence over this file.
+
+# ============================================================================
+# NETWORK MONITORING CONFIGURATION
+# ============================================================================
+
+network:
+  # WiFi Quality Monitor
+  wifi:
+    # update_interval: 10  # Seconds between WiFi quality checks
+    # max_history: 60      # Number of entries to keep in memory
+    # retention_days: 7    # Days to keep CSV log files
+    # log_file: ~/wifi_quality.csv
+    # events_file: ~/wifi_events.csv
+    # diagnostics_file: ~/network_diagnostics.csv
+
+  # Internet Speed Test Monitor
+  speedtest:
+    # update_interval: 60          # Seconds between speed tests (1 minute)
+    # max_history: 20              # Number of entries to keep in memory
+    # retention_days: 7            # Days to keep CSV log files
+    # slow_speed_threshold: 20.0   # Mbps - alert if speed below this
+    # consecutive_slow_trigger: 5  # Number of consecutive slow tests before alert
+    # slow_alert_cooldown: 300     # Seconds between alerts (5 minutes)
+    # log_file: ~/speedtest_history.csv
+
+  # Ping Latency Monitor
+  ping:
+    # update_interval: 5           # Seconds between ping tests
+    # max_history: 100             # Number of entries to keep in memory
+    # retention_days: 7            # Days to keep CSV log files
+    # ping_count: 3                # Number of pings per test
+    # ping_timeout: 2              # Timeout in seconds
+    # packet_loss_threshold: 10.0  # Percent - alert if loss above this
+    # latency_threshold: 100       # Milliseconds - alert if latency above this
+    # log_file: ~/ping_history.csv
+
+# ============================================================================
+# FLEET SERVER CONFIGURATION
+# ============================================================================
+
+fleet_server:
+  # Network Settings
+  network:
+    # host: "0.0.0.0"    # Listen on all interfaces
+    # port: 8778         # Fleet server port (override with FLEET_SERVER_PORT env var)
+    # backlog: 5         # Number of queued connections
+
+  # SSL/TLS Settings
+  ssl:
+    # enabled: true                # Enable HTTPS (override with FLEET_SSL_ENABLED env var)
+    # cert_file: ~/.fleet-certs/cert.pem
+    # key_file: ~/.fleet-certs/privkey.pem
+    # min_tls_version: "TLSv1_2"   # Minimum TLS version (SECURITY)
+    # max_tls_version: "TLSv1_3"   # Maximum TLS version
+    # verify_client_certs: false   # Set true for mutual TLS
+
+  # Authentication Settings
+  auth:
+    # api_key_header: "X-API-Key"
+    # session_cookie_name: "fleet_session"
+    # session_expiry: 28800        # Seconds (8 hours)
+    # password_hash_rounds: 12     # bcrypt rounds (2^12 = 4,096 iterations)
+    # min_password_length: 12
+    # require_password_complexity: true
+
+  # Data Storage Settings
+  storage:
+    # data_dir: ~/.fleet-data
+    # persistence_file: ~/.fleet-data/fleet_data.json
+    # encrypted_persistence_file: ~/.fleet-data/fleet_data.enc
+    # max_history_per_machine: 100  # Data points to keep per machine
+    # max_command_queue_size: 50
+    # data_retention_days: 30
+
+  # Agent Communication Settings
+  agent:
+    # report_interval: 60           # Seconds - how often agents should report
+    # health_check_timeout: 300     # Seconds (5 minutes)
+    # offline_threshold: 180        # Seconds (3 minutes)
+    # max_report_size: 10485760     # Bytes (10 MB)
+
+  # End-to-End Encryption (E2EE) Settings
+  e2ee:
+    # enabled: false                # Set true to require E2EE for agent communications
+    # key_rotation_interval: 7776000  # Seconds (90 days)
+    # encryption_key_file: ~/.fleet-config/encryption_key.key
+
+  # Cluster/High Availability Settings
+  cluster:
+    # enabled: false                # Enable cluster mode
+    # mode: "standalone"            # "standalone", "primary", or "replica"
+    # secret_file: ~/.fleet-config/cluster_secret.key
+    # min_secret_length: 32         # Bytes (256 bits)
+    # replay_window: 30             # Seconds (SECURITY: reduced from 300)
+    # sync_interval: 10             # Seconds
+    # health_check_interval: 5      # Seconds
+
+# ============================================================================
+# FLEET AGENT CONFIGURATION
+# ============================================================================
+
+fleet_agent:
+  # Server Connection
+  server:
+    # url: "https://localhost:8778"  # Fleet server URL (override with FLEET_SERVER_URL env var)
+    # api_key: null                  # Set via FLEET_API_KEY environment variable
+    # verify_ssl: true               # Verify SSL certificate
+    # timeout: 30                    # Connection timeout in seconds
+
+  # Reporting Settings
+  reporting:
+    # interval: 60                   # Seconds between reports to server
+    # retry_attempts: 3              # Number of retry attempts on failure
+    # retry_backoff: 2.0             # Exponential backoff multiplier
+    # max_retry_delay: 300           # Maximum retry delay in seconds (5 minutes)
+
+  # Data Collection
+  collection:
+    # include_widgets: true          # Include widget data in reports
+    # widget_log_max_size: 1000      # Maximum lines of widget logs to include
+    # collect_system_info: true      # Collect system information
+    # collect_network_info: true     # Collect network information
+
+# ============================================================================
+# DISPLAY CONFIGURATION
+# ============================================================================
+
+display:
+  # Layout Manager
+  layout:
+    # default_layout: "full"         # "full", "compact", or "minimal"
+    # refresh_interval: 1000         # Milliseconds
+    # transition_duration: 300       # Milliseconds
+
+  # Theme Settings
+  theme:
+    # default_theme: "dark"          # "dark", "light", or "auto"
+    # color_scheme: "blue"           # "blue", "green", "red", "purple"
+    # font_family: "San Francisco, -apple-system, BlinkMacSystemFont, Helvetica, Arial"
+    # font_size_base: 14             # Pixels
+
+  # Widget Server
+  widget_server:
+    # host: "127.0.0.1"
+    # port: 8080
+    # auto_reload: true
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+
+security:
+  # Password Hashing (bcrypt)
+  password:
+    # algorithm: "bcrypt"
+    # rounds: 12                     # 2^12 = 4,096 iterations
+    # min_length: 12                 # Minimum password length (override with FLEET_MIN_PASSWORD_LENGTH env var)
+    # require_uppercase: true
+    # require_lowercase: true
+    # require_digits: true
+    # require_special: true
+
+  # Encryption (Configuration files)
+  encryption:
+    # algorithm: "fernet"            # AES-128-CBC + HMAC-SHA256
+    # kdf: "pbkdf2hmac"
+    # kdf_iterations: 600000         # OWASP recommendation for PBKDF2
+    # kdf_hash: "sha256"
+    # salt_length: 32                # Bytes
+    # key_length: 32                 # Bytes
+
+  # Session Management
+  session:
+    # token_length: 32               # Bytes (256 bits)
+    # token_algorithm: "urlsafe_base64"
+    # expiry: 28800                  # Seconds (8 hours)
+    # cookie_secure: true            # HTTPS only
+    # cookie_httponly: true          # No JavaScript access
+    # cookie_samesite: "Strict"      # CSRF protection
+
+  # Brute Force Protection
+  brute_force:
+    # enabled: true
+    # max_attempts: 5                # Maximum failed login attempts
+    # lockout_duration: 1800         # Seconds (30 minutes)
+    # cleanup_interval: 3600         # Seconds (1 hour)
+
+  # Certificate Management
+  certificates:
+    # key_size: 4096                 # Bits (SECURITY: upgraded from 2048)
+    # validity_days: 365
+    # auto_renewal: true
+    # renewal_before_days: 30
+    # encrypt_private_keys: true
+
+# ============================================================================
+# PACKAGE BUILDER CONFIGURATION
+# ============================================================================
+
+package:
+  # Build Settings
+  build:
+    # output_dir: ~/Desktop/fleet-installers
+    # temp_dir: /tmp/fleet-build
+    # identifier_prefix: "com.atlas.fleet"
+
+  # Standalone Package
+  standalone:
+    # name: "ATLAS Fleet Monitor"
+    # version: "1.0.0"
+    # install_location: "/Applications/ATLAS Fleet Monitor.app"
+
+  # Agent Package
+  agent:
+    # name: "ATLAS Fleet Agent"
+    # version: "1.0.0"
+    # install_location: "/Library/Application Support/ATLASFleetAgent"
+    # launch_daemon_label: "com.atlas.fleet.agent"
+
+# ============================================================================
+# ENVIRONMENT VARIABLE OVERRIDES
+# ============================================================================
+
+# The following environment variables can be used to override settings:
+#
+# Fleet Server:
+#   FLEET_SERVER_PORT=8778
+#   FLEET_SSL_ENABLED=true
+#
+# Fleet Agent:
+#   FLEET_SERVER_URL=https://fleet.example.com:8778
+#   FLEET_API_KEY=your_api_key_here
+#
+# Security:
+#   FLEET_MIN_PASSWORD_LENGTH=12
+#
+# Environment variables take precedence over this file.

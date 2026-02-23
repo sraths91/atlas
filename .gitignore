@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Logs
+*.log
+
+# Runtime
+*.pid
+
+# Secrets and credentials
+*.encrypted
+cookies.txt
+fleet-server.crt
+fleet-server.key
+.env
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# pytest
+.pytest_cache/

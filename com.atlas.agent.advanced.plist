@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- ========================================
+         SMART SCREEN AGENT - ADVANCED CONFIGURATION
+         Includes all available restart trigger options
+         Uncomment sections to enable features
+         ======================================== -->
+    
+    <!-- Service identification -->
+    <key>Label</key>
+    <string>com.atlas.agent</string>
+    
+    <!-- Program to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/python3</string>
+        <string>-m</string>
+        <string>atlas.live_widgets</string>
+        <string>--port</string>
+        <string>8767</string>
+        <string>--fleet-server</string>
+        <string>https://localhost:8768</string>
+    </array>
+    
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/samraths/CascadeProjects/windsurf-project-2</string>
+    
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/samraths/CascadeProjects/windsurf-project-2</string>
+    </dict>
+    
+    <!-- ========================================
+         AUTO-RESTART CONFIGURATION
+         ======================================== -->
+    
+    <key>KeepAlive</key>
+    <dict>
+        <!-- ENABLED: Restart if process crashes (segfault, SIGKILL, etc.) -->
+        <key>Crashed</key>
+        <true/>
+        
+        <!-- ENABLED: Restart on error exit (non-zero exit code) -->
+        <key>SuccessfulExit</key>
+        <false/>
+        
+        <!-- OPTIONAL: Restart when network becomes available
+             Uncomment to enable: Agent only runs when network is up -->
+        <!--
+        <key>NetworkState</key>
+        <true/>
+        -->
+        
+        <!-- OPTIONAL: Restart based on file existence
+             Uncomment to enable: Agent only runs when "enabled" file exists
+             Usage: touch ~/.atlas/enabled (to start)
+                    rm ~/.atlas/enabled (to stop) -->
+        <!--
+        <key>PathState</key>
+        <dict>
+            <key>/Users/samraths/.atlas/enabled</key>
+            <true/>
+        </dict>
+        -->
+        
+        <!-- OPTIONAL: Restart based on other service status
+             Uncomment to enable: Agent only runs when Fleet Server is running -->
+        <!--
+        <key>OtherJobEnabled</key>
+        <dict>
+            <key>com.fleet.server</key>
+            <true/>
+        </dict>
+        -->
+    </dict>
+    
+    <!-- ========================================
+         RESTART TIMING
+         ======================================== -->
+    
+    <!-- Start at boot -->
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <!-- Throttle: Wait 10 seconds between restart attempts
+         Adjust if needed:
+         - 5  = Fast restart (aggressive)
+         - 10 = Default (balanced) ✓
+         - 30 = Slow restart (conservative)
+         - 60 = Very slow (for problematic services) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <!-- Exit timeout: Wait 30 seconds for graceful shutdown
+         Adjust if needed:
+         - 10 = Quick shutdown
+         - 30 = Default (gives time to save state) ✓
+         - 60 = Slow shutdown (complex cleanup) -->
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+    
+    <!-- OPTIONAL: Periodic restart (regardless of status)
+         Uncomment to enable: Restart every N seconds
+         Good for preventing memory leaks
+         Examples:
+         - 3600  = Every hour
+         - 21600 = Every 6 hours
+         - 43200 = Every 12 hours -->
+    <!--
+    <key>StartInterval</key>
+    <integer>43200</integer>
+    -->
+    
+    <!-- OPTIONAL: Scheduled restart at specific time
+         Uncomment to enable: Daily restart at 3 AM
+         Good for maintenance windows and log rotation -->
+    <!--
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    -->
+    
+    <!-- OPTIONAL: Multiple scheduled restarts
+         Uncomment to enable: Restart multiple times per day
+         Example: Restart at 3 AM and 3 PM -->
+    <!--
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>15</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+    -->
+    
+    <!-- OPTIONAL: Weekly restart
+         Uncomment to enable: Restart every Sunday at midnight -->
+    <!--
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    -->
+    
+    <!-- ========================================
+         LOGGING
+         ======================================== -->
+    
+    <!-- Standard output log -->
+    <key>StandardOutPath</key>
+    <string>/var/log/atlas-agent.log</string>
+    
+    <!-- Error output log -->
+    <key>StandardErrorPath</key>
+    <string>/var/log/atlas-agent-error.log</string>
+    
+    <!-- ========================================
+         PROCESS CONFIGURATION
+         ======================================== -->
+    
+    <!-- User to run as -->
+    <key>UserName</key>
+    <string>samraths</string>
+    
+    <!-- Process type (Background = doesn't need UI) -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <!-- Nice level: Lower priority to not impact system
+         Range: -20 (highest) to 20 (lowest)
+         Default: 5 (slightly lower priority) -->
+    <key>Nice</key>
+    <integer>5</integer>
+    
+    <!-- Prevent shell globbing -->
+    <key>EnableGlobbing</key>
+    <false/>
+    
+    <!-- ========================================
+         ADVANCED OPTIONS (OPTIONAL)
+         ======================================== -->
+    
+    <!-- OPTIONAL: Resource limits
+         Uncomment to limit memory/CPU usage -->
+    <!--
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>1024</integer>
+        <key>NumberOfProcesses</key>
+        <integer>100</integer>
+    </dict>
+    -->
+    
+    <!-- OPTIONAL: Low priority during system load
+         Uncomment to enable: Pause when system is busy -->
+    <!--
+    <key>LowPriorityIO</key>
+    <true/>
+    -->
+    
+    <!-- OPTIONAL: Abandon process if taking too long to start
+         Uncomment to enable: Kill if not started within N seconds -->
+    <!--
+    <key>LaunchOnlyOnce</key>
+    <false/>
+    <key>AbandonProcessGroup</key>
+    <true/>
+    -->
+    
+</dict>
+</plist>

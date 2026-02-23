@@ -1,0 +1,69 @@
+#!/bin/bash
+#
+# Post-installation script for Fleet Agent
+#
+
+set -e
+
+# Configuration
+INSTALL_DIR="/Library/Application Support/FleetAgent"
+CONFIG_FILE="$INSTALL_DIR/config.json"
+LAUNCHDAEMON="/Library/LaunchDaemons/com.fleet.agent.plist"
+LOG_FILE="/var/log/fleet-agent-install.log"
+
+echo "$(date): Fleet Agent post-installation started" >> "$LOG_FILE"
+
+# Create application support directory
+echo "Creating application support directory..." >> "$LOG_FILE"
+mkdir -p "$INSTALL_DIR"
+chmod 755 "$INSTALL_DIR"
+
+# Copy configuration template if config doesn't exist
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Creating default configuration..." >> "$LOG_FILE"
+    cp /tmp/fleet-agent-resources/config.json.template "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+else
+    echo "Configuration file already exists, preserving it" >> "$LOG_FILE"
+fi
+
+# Copy LaunchDaemon
+echo "Installing LaunchDaemon..." >> "$LOG_FILE"
+cp /tmp/fleet-agent-resources/com.fleet.agent.plist "$LAUNCHDAEMON"
+chmod 644 "$LAUNCHDAEMON"
+chown root:wheel "$LAUNCHDAEMON"
+
+# Create log files with proper permissions
+touch /var/log/fleet-agent.log
+touch /var/log/fleet-agent.error.log
+chmod 644 /var/log/fleet-agent.log
+chmod 644 /var/log/fleet-agent.error.log
+
+echo "$(date): Fleet Agent post-installation completed" >> "$LOG_FILE"
+
+# Check if configuration is pre-configured (has a real server URL)
+if grep -q "YOUR_SERVER_IP" "$CONFIG_FILE" 2>/dev/null || grep -q "\"\"" "$CONFIG_FILE" 2>/dev/null; then
+    # Not pre-configured, user needs to configure
+    echo "" >> "$LOG_FILE"
+    echo "==============================================================================" >> "$LOG_FILE"
+    echo "Installation successful!" >> "$LOG_FILE"
+    echo "Next: Open 'Fleet Agent Configuration' from Applications folder" >> "$LOG_FILE"
+    echo "==============================================================================" >> "$LOG_FILE"
+    echo "" >> "$LOG_FILE"
+else
+    # Pre-configured, start service automatically
+    echo "" >> "$LOG_FILE"
+    echo "==============================================================================" >> "$LOG_FILE"
+    echo "Installation successful!" >> "$LOG_FILE"
+    echo "Configuration pre-installed - starting agent automatically..." >> "$LOG_FILE"
+    echo "==============================================================================" >> "$LOG_FILE"
+    echo "" >> "$LOG_FILE"
+    
+    # Load and start the service
+    launchctl load "$LAUNCHDAEMON" 2>&1 | tee -a "$LOG_FILE"
+    
+    echo "$(date): Fleet Agent service started" >> "$LOG_FILE"
+    echo "Agent is now reporting to fleet server" >> "$LOG_FILE"
+fi
+
+exit 0

@@ -1,0 +1,4516 @@
+"""
+Fleet Server - Central monitoring server for Mac fleet
+"""
+import json
+import logging
+import os
+import base64
+import hashlib
+import urllib.parse
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+from collections import defaultdict, deque
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+from pathlib import Path
+import threading
+import http.cookies
+
+from atlas.fleet_storage import PersistentFleetDataStore
+from atlas.fleet_machine_detail import get_machine_detail_html
+from atlas.config.defaults import safe_int_param
+from atlas.fleet_login_page import (
+    generate_login_page,
+    generate_password_reset_page,
+    get_base_styles,
+    get_toast_script
+)
+from atlas.fleet_network_analyzer import FleetNetworkAnalyzer
+
+# Import refactored modules (Phase 4: Fleet Server Decomposition)
+from atlas.fleet.server.data_store import FleetDataStore
+from atlas.fleet.server.auth import FleetAuthManager
+from atlas.fleet.server.router import FleetRouter
+
+# Try to import encrypted storage (requires cryptography package)
+try:
+    from atlas.fleet_storage_encrypted import EncryptedFleetDataStore
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
+
+# Import encryption module for end-to-end payload encryption
+try:
+    from atlas.encryption import DataEncryption, ENCRYPTION_AVAILABLE as E2EE_AVAILABLE
+except ImportError:
+    E2EE_AVAILABLE = False
+    DataEncryption = None
+
+# Import security infrastructure (Phase 4: Security Improvements)
+from atlas.security_headers import SecurityHeaders, RateLimiter
+
+# Import TouchID functions for macOS biometric authentication
+try:
+    from atlas.dashboard_auth import check_touchid_available, authenticate_with_touchid
+    TOUCHID_SUPPORT = True
+except ImportError:
+    TOUCHID_SUPPORT = False
+    def check_touchid_available():
+        return False
+    def authenticate_with_touchid(reason=""):
+        return False, "TouchID not available"
+
+logger = logging.getLogger(__name__)
+
+# FleetDataStore has been moved to atlas.fleet.server.data_store (Phase 4)
+# It is imported above for use in this module
+
+
+class FleetServerHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for fleet server"""
+
+    data_store = None  # Will be set by server
+    api_key = None  # Optional API key for authentication
+    auth_manager = None  # FleetAuthManager instance (Phase 4)
+    router = None  # FleetRouter instance (Phase 4 Stage 5)
+    web_username = None  # Optional username for web UI
+    web_password = None  # Optional password for web UI (hashed)
+    encryption = None  # Optional encryption handler for E2EE
+    cluster_manager = None  # Optional cluster manager for HA mode
+    security_headers = None  # SecurityHeaders instance (Phase 4 Security)
+    rate_limiter = None  # RateLimiter instance (Phase 4 Security)
+    use_ssl = False  # Whether SSL is enabled
+
+    def log_message(self, format, *args):
+        """Override to use logger"""
+        logger.info(f"{self.address_string()} - {format % args}")
+
+    # Authentication methods moved to FleetAuthManager (Phase 4)
+    # Keeping wrapper methods for backward compatibility
+
+    def _get_session_token(self) -> Optional[str]:
+        """Extract session token from cookie - delegates to FleetAuthManager"""
+        return FleetAuthManager.get_session_token(self)
+
+    def _check_web_auth(self) -> tuple[bool, Optional[str]]:
+        """Check session-based authentication - delegates to FleetAuthManager"""
+        return FleetAuthManager.check_web_auth(self)
+
+    def _send_auth_required(self):
+        """Send 401 Unauthorized - delegates to FleetAuthManager"""
+        FleetAuthManager.send_auth_required(self)
+
+    def _check_auth(self) -> bool:
+        """Check API key authentication - delegates to FleetAuthManager"""
+        if self.auth_manager:
+            return self.auth_manager.check_api_key(self)
+        # Fallback to old behavior if auth_manager not set
+        if not self.api_key:
+            return True
+        provided_key = self.headers.get('X-API-Key')
+        return provided_key == self.api_key
+    
+    def _add_security_headers(self):
+        """Add security headers to response (Phase 4 Security)"""
+        if self.security_headers:
+            request_origin = self.headers.get('Origin')
+            headers = self.security_headers.get_security_headers(request_origin)
+            for key, value in headers.items():
+                self.send_header(key, value)
+
+    def _send_json(self, data: Any, status: int = 200):
+        """Send JSON response"""
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self._add_security_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def _send_html(self, html: str):
+        """Send HTML response"""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self._add_security_headers()
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
+    
+    def _get_encryption_key_from_config(self) -> Optional[str]:
+        """Get E2EE encryption key from config file"""
+        config_path = Path.home() / '.fleet-config.json'
+        try:
+            # Try encrypted config first
+            from .fleet_config_encryption import EncryptedConfigManager
+            encrypted_path = config_path.with_suffix('.json.encrypted')
+            if encrypted_path.exists():
+                manager = EncryptedConfigManager(str(config_path))
+                config = manager.decrypt_config()
+                if config:
+                    return config.get('server', {}).get('encryption_key')
+
+            # Fall back to plaintext
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                return config.get('server', {}).get('encryption_key')
+        except Exception as e:
+            logger.error(f"Error reading encryption key from config: {e}")
+        return None
+    
+    def _save_encryption_key_to_config(self, encryption_key: str):
+        """Save E2EE encryption key to config file"""
+        config_path = Path.home() / '.fleet-config.json'
+        try:
+            # Try encrypted config first
+            from .fleet_config_encryption import EncryptedConfigManager
+            encrypted_path = config_path.with_suffix('.json.encrypted')
+
+            if encrypted_path.exists():
+                manager = EncryptedConfigManager(str(config_path))
+                config = manager.decrypt_config() or {}
+                if 'server' not in config:
+                    config['server'] = {}
+                config['server']['encryption_key'] = encryption_key
+                manager.encrypt_config(config)
+                logger.info("Saved encryption key to encrypted config")
+                return
+
+            # Fall back to plaintext
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            else:
+                config = {}
+
+            if 'server' not in config:
+                config['server'] = {}
+            config['server']['encryption_key'] = encryption_key
+
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            logger.info("Saved encryption key to plaintext config")
+
+        except Exception as e:
+            logger.error(f"Error saving encryption key to config: {e}")
+            raise
+    
+    def _handle_acme_challenge(self, path: str):
+        """Handle ACME HTTP-01 challenge for Let's Encrypt"""
+        try:
+            # Extract token from path
+            token = path.replace('/.well-known/acme-challenge/', '')
+
+            # Look for challenge file in configured webroot
+            webroot = Path.home() / '.fleet-certs' / 'acme-challenge'
+            challenge_file = webroot / token
+
+            if challenge_file.exists():
+                with open(challenge_file, 'r') as f:
+                    challenge_response = f.read()
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(challenge_response.encode())
+                logger.info(f"Served ACME challenge: {token}")
+            else:
+                logger.warning(f"ACME challenge file not found: {challenge_file}")
+                self.send_response(404)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Challenge not found')
+        except Exception as e:
+            logger.error(f"Error handling ACME challenge: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Internal server error')
+    
+    def do_OPTIONS(self):
+        """Handle CORS preflight"""
+        # CORS disabled for security
+        # If you need to allow cross-origin requests from specific domains:
+        # 1. Get origin from: origin = self.headers.get('Origin')
+        # 2. Check if allowed: if origin in allowed_origins
+        # 3. Set headers: self.send_header('Access-Control-Allow-Origin', origin)
+        self.send_response(200)
+        self.end_headers()
+    
+    def do_GET(self):
+        """Handle GET requests - dispatches to router (Phase 4 Stage 5)"""
+        # Rate limiting check (Phase 4 Security)
+        if self.rate_limiter:
+            client_ip = self.client_address[0]
+            if not self.rate_limiter.is_allowed(client_ip):
+                self._send_json({'error': 'Rate limit exceeded. Please try again later.'}, 429)
+                return
+
+        if self.router:
+            self.router.dispatch(self, 'GET', self.path)
+        else:
+            # Fallback if router not initialized
+            logger.error("Router not initialized!")
+            self.send_error(503, "Service Unavailable - Router not initialized")
+
+    def do_GET_OLD_MONOLITHIC(self):
+        """OLD IMPLEMENTATION - Kept for reference during migration
+        TODO: Remove after Stage 5 testing complete"""
+        path = self.path.split('?')[0]
+
+        try:
+            # Handle ACME HTTP-01 challenge for Let's Encrypt
+            if path.startswith('/.well-known/acme-challenge/'):
+                self._handle_acme_challenge(path)
+                return
+
+            if path == '/' or path == '/login':
+                # Serve login page with TouchID support on macOS
+                touchid_available = check_touchid_available()
+                self._send_html(generate_login_page(touchid_available=touchid_available))
+            
+            elif path == '/logout':
+                # Handle logout
+                session_token = self._get_session_token()
+                if session_token:
+                    from .fleet_user_manager import FleetUserManager
+                    user_manager = FleetUserManager()
+                    user_manager.destroy_session(session_token)
+                
+                # Clear cookie and redirect to login
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                # SECURITY: Include Secure flag on cookie clearing as well
+                self.send_header('Set-Cookie', 'fleet_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure')
+                self.end_headers()
+            
+            elif path == '/password-reset':
+                # Check if user is authenticated but needs password update
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self.send_response(302)
+                    self.send_header('Location', '/login')
+                    self.end_headers()
+                    return
+                
+                # Serve password reset page
+                self._send_html(generate_password_reset_page(username))
+            
+            elif path == '/dashboard':
+                # Check web authentication for dashboard
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self.send_response(302)
+                    self.send_header('Location', '/login')
+                    self.end_headers()
+                    return
+                
+                # Check if user needs password update
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                needs_update, reason = user_manager.check_password_needs_update(username)
+                
+                if needs_update:
+                    # Redirect to password reset page
+                    self.send_response(302)
+                    self.send_header('Location', '/password-reset')
+                    self.end_headers()
+                    return
+                
+                # Serve fleet dashboard
+                self._send_html(get_fleet_dashboard_html())
+            
+            elif path == '/settings':
+                # Check web authentication for settings page
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self.send_response(302)
+                    self.send_header('Location', '/login')
+                    self.end_headers()
+                    return
+                # Serve settings page
+                from .fleet_settings_page import get_settings_html
+                self._send_html(get_settings_html())
+            
+            elif path == '/api/fleet/storage-info':
+                # Check web authentication for settings info page
+                if not self._check_web_auth():
+                    self._send_auth_required()
+                    return
+                # Serve settings info page
+                self._send_html(get_settings_info_html(self.data_store))
+            
+            elif path == '/api/fleet/cert-status':
+                # Check web authentication
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get certificate expiration warning
+                try:
+                    from .fleet_cert_manager import CertificateManager
+                    manager = CertificateManager()
+                    warning = manager.get_expiration_warning()
+                    self._send_json({'warning': warning})
+                except Exception as e:
+                    logger.error(f"Error checking certificate status: {e}")
+                    self._send_json({'warning': None})
+            
+            elif path == '/api/fleet/cert-info':
+                # Check web authentication
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get certificate information
+                try:
+                    from .fleet_cert_manager import CertificateManager
+                    manager = CertificateManager()
+                    info = manager.get_certificate_info()
+                    self._send_json({'info': info})
+                except Exception as e:
+                    logger.error(f"Error getting certificate info: {e}")
+                    self._send_json({'info': None, 'error': 'Failed to get certificate info'})
+            
+            elif path == '/api/fleet/machines':
+                # Check web authentication for API used by web UI
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get all machines
+                machines = self.data_store.get_all_machines()
+                self._send_json({'machines': machines})
+            
+            elif path == '/api/fleet/summary':
+                # Check web authentication for API used by web UI
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get fleet summary
+                summary = self.data_store.get_fleet_summary()
+                self._send_json(summary)
+
+            elif path == '/api/fleet/server-resources':
+                # Get fleet server process resource usage only (not system-wide)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+
+                try:
+                    import psutil
+                    import os
+
+                    # Get the fleet server process
+                    process = psutil.Process(os.getpid())
+                    process_memory = process.memory_info()
+
+                    # Get process CPU (call once to initialize, then get value)
+                    process.cpu_percent()
+                    import time
+                    time.sleep(0.1)
+                    process_cpu = process.cpu_percent()
+
+                    # Get data directory size
+                    data_dir_size = 0
+                    data_dir = Path.home() / '.fleet-server'
+                    if data_dir.exists():
+                        for fp in data_dir.rglob('*'):
+                            if fp.is_file():
+                                try:
+                                    data_dir_size += fp.stat().st_size
+                                except (OSError, IOError):
+                                    pass
+
+                    # Get log file sizes (check new persistent log directory)
+                    log_size = 0
+                    log_dir = Path.home() / 'Library' / 'Logs' / 'FleetServer'
+                    if log_dir.exists():
+                        for fp in log_dir.rglob('*'):
+                            if fp.is_file():
+                                try:
+                                    log_size += fp.stat().st_size
+                                except (OSError, IOError):
+                                    pass
+                    
+                    # Get process creation time and uptime
+                    create_time = process.create_time()
+                    uptime_seconds = time.time() - create_time
+                    
+                    # Get open file descriptors and connections
+                    try:
+                        num_fds = process.num_fds()
+                    except (psutil.AccessDenied, OSError, AttributeError):
+                        num_fds = 0
+                    
+                    try:
+                        connections = len(process.connections())
+                    except (psutil.AccessDenied, OSError):
+                        connections = 0
+                    
+                    self._send_json({
+                        'process': {
+                            'pid': os.getpid(),
+                            'cpu_percent': process_cpu,
+                            'memory_rss': process_memory.rss,
+                            'memory_vms': process_memory.vms,
+                            'memory_percent': process.memory_percent(),
+                            'threads': process.num_threads(),
+                            'uptime_seconds': uptime_seconds,
+                            'open_files': num_fds,
+                            'connections': connections
+                        },
+                        'storage': {
+                            'data_dir_size': data_dir_size,
+                            'log_size': log_size,
+                            'total_size': data_dir_size + log_size
+                        }
+                    })
+                except Exception as e:
+                    logger.error(f"Error getting server resources: {e}")
+                    self._send_json({'error': 'Failed to get server resources'}, 500)
+
+            elif path == '/api/fleet/storage':
+                # Inspect storage/backend information
+                info = {}
+                # Some data_store implementations may not support storage_info
+                if hasattr(self.data_store, 'storage_info'):
+                    try:
+                        info = self.data_store.storage_info()
+                    except Exception as e:
+                        logger.error(f"Error getting storage info: {e}", exc_info=True)
+                        info = {'error': 'Failed to get storage info'}
+                else:
+                    info = {
+                        'backend': 'in_memory',
+                        'note': 'Current data store does not expose storage_info()'
+                    }
+                self._send_json(info)
+            
+            elif path == '/api/fleet/cluster/status':
+                # Get cluster status (health check and node information)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                if self.cluster_manager and self.cluster_manager.enabled:
+                    status = self.cluster_manager.get_cluster_status()
+                    self._send_json(status)
+                else:
+                    self._send_json({
+                        'enabled': False,
+                        'mode': 'standalone',
+                        'message': 'Cluster mode not enabled'
+                    })
+            
+            elif path == '/api/fleet/cluster/health':
+                # Health check endpoint (for load balancers)
+                # No authentication required for health checks
+                if self.cluster_manager:
+                    is_healthy = self.cluster_manager.is_healthy()
+                    if is_healthy:
+                        self._send_json({'status': 'healthy', 'node_id': self.cluster_manager.node_id})
+                    else:
+                        self._send_json({'status': 'unhealthy', 'node_id': self.cluster_manager.node_id}, 503)
+                else:
+                    # Standalone mode is always healthy
+                    self._send_json({'status': 'healthy', 'mode': 'standalone'})
+            
+            elif path == '/api/fleet/cluster/nodes':
+                # Get list of active cluster nodes
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                if self.cluster_manager and self.cluster_manager.enabled:
+                    nodes = self.cluster_manager.get_active_nodes()
+                    self._send_json({
+                        'nodes': [node.to_dict() for node in nodes],
+                        'count': len(nodes)
+                    })
+                else:
+                    self._send_json({
+                        'nodes': [],
+                        'count': 0,
+                        'message': 'Cluster mode not enabled'
+                    })
+            
+            elif path == '/api/fleet/cluster/health-check':
+                # Comprehensive health check for cluster monitoring
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                if not self.cluster_manager or not self.cluster_manager.enabled:
+                    self._send_json({'error': 'Cluster mode not enabled'}, 400)
+                    return
+                
+                try:
+                    import time
+                    from datetime import datetime, timedelta
+                    
+                    health_data = {}
+                    
+                    # Check backend connection
+                    backend_healthy = False
+                    backend_latency = 0
+                    backend_type = self.cluster_manager.config.get('backend', 'unknown')
+                    backend_host = None
+                    backend_error = None
+                    
+                    try:
+                        start_time = time.time()
+                        # Test backend connectivity
+                        if hasattr(self.cluster_manager.storage, 'ping'):
+                            self.cluster_manager.storage.ping()
+                        backend_healthy = True
+                        backend_latency = int((time.time() - start_time) * 1000)
+                        
+                        # Get backend host if available
+                        if backend_type == 'redis':
+                            redis_config = self.cluster_manager.config.get('redis', {})
+                            backend_host = f"{redis_config.get('host', 'unknown')}:{redis_config.get('port', 6379)}"
+                    except Exception as e:
+                        backend_error = str(e)
+                    
+                    health_data['backend'] = {
+                        'connected': backend_healthy,
+                        'type': backend_type,
+                        'latency_ms': backend_latency if backend_healthy else None,
+                        'host': backend_host,
+                        'error': backend_error
+                    }
+                    
+                    # Check node status
+                    nodes = self.cluster_manager.get_active_nodes()
+                    current_node_id = self.cluster_manager.node_id
+                    
+                    node_list = []
+                    healthy_nodes = 0
+                    degraded_nodes = 0
+                    
+                    for node in nodes:
+                        # Calculate time since last heartbeat
+                        heartbeat_age = (datetime.now() - node.last_heartbeat).total_seconds()
+                        
+                        # Determine node status
+                        if heartbeat_age < 15:  # Fresh heartbeat
+                            node_status = 'healthy'
+                            healthy_nodes += 1
+                        elif heartbeat_age < 30:  # Aging heartbeat
+                            node_status = 'degraded'
+                            degraded_nodes += 1
+                        else:  # Stale heartbeat
+                            node_status = 'offline'
+                        
+                        # Calculate uptime
+                        uptime_seconds = (datetime.now() - node.last_heartbeat).total_seconds()
+                        if uptime_seconds < 60:
+                            uptime = f"{int(uptime_seconds)}s"
+                        elif uptime_seconds < 3600:
+                            uptime = f"{int(uptime_seconds / 60)}m"
+                        elif uptime_seconds < 86400:
+                            uptime = f"{int(uptime_seconds / 3600)}h"
+                        else:
+                            uptime = f"{int(uptime_seconds / 86400)}d"
+                        
+                        node_list.append({
+                            'node_id': node.node_id,
+                            'status': node_status,
+                            'last_heartbeat': node.last_heartbeat.strftime('%Y-%m-%d %H:%M:%S'),
+                            'host': node.host,
+                            'uptime': uptime,
+                            'is_current': node.node_id == current_node_id
+                        })
+                    
+                    health_data['nodes'] = node_list
+                    
+                    # Check data synchronization
+                    sync_healthy = backend_healthy  # If backend is healthy, sync should be working
+                    session_count = 0
+                    
+                    try:
+                        # Count active sessions (if session storage is available)
+                        if hasattr(self, 'session_store') and self.session_store:
+                            # Try to count sessions
+                            session_count = len(getattr(self.session_store, '_sessions', {}))
+                    except (AttributeError, TypeError):
+                        pass
+                    
+                    health_data['sync'] = {
+                        'synced': sync_healthy,
+                        'session_count': session_count,
+                        'last_sync': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'details': 'All nodes sharing data via backend' if sync_healthy else None,
+                        'error': 'Backend connection issue' if not sync_healthy else None
+                    }
+                    
+                    # Check failover readiness
+                    failover_ready = healthy_nodes >= 2
+                    
+                    health_data['failover'] = {
+                        'ready': failover_ready,
+                        'healthy_nodes': healthy_nodes,
+                        'details': f"Cluster can survive {healthy_nodes - 1} node failure(s)" if failover_ready else None
+                    }
+                    
+                    # Overall health status
+                    if healthy_nodes >= 2 and backend_healthy:
+                        overall = 'healthy'
+                    elif healthy_nodes >= 1 and backend_healthy:
+                        overall = 'degraded'
+                    else:
+                        overall = 'critical'
+                    
+                    health_data['overall'] = overall
+                    
+                    self._send_json(health_data)
+                
+                except Exception as e:
+                    logger.error(f"Error performing health check: {e}", exc_info=True)
+                    self._send_json({'error': 'Health check failed'}, 500)
+            
+            elif path.startswith('/api/fleet/machine/'):
+                # Check web authentication for API used by web UI
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get specific machine (by machine_id or serial number)
+                identifier = path.split('/')[-1]
+                machine = self.data_store.get_machine(identifier)
+                
+                # If not found by machine_id, try to find by serial number
+                if not machine:
+                    all_machines = self.data_store.get_all_machines()
+                    for m in all_machines:
+                        if m.get('info', {}).get('serial_number') == identifier:
+                            machine = m
+                            break
+                
+                if machine:
+                    self._send_json(machine)
+                else:
+                    self._send_json({'error': 'Machine not found'}, 404)
+            
+            elif path.startswith('/api/fleet/history/'):
+                # Check web authentication for API used by web UI
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get machine history (by machine_id or serial number)
+                identifier = path.split('/')[-1]
+                
+                # Try to resolve serial number to machine_id
+                machine_id = identifier
+                machine = self.data_store.get_machine(identifier)
+                if not machine:
+                    all_machines = self.data_store.get_all_machines()
+                    for m in all_machines:
+                        if m.get('info', {}).get('serial_number') == identifier:
+                            machine_id = m['machine_id']
+                            break
+                
+                history = self.data_store.get_machine_history(machine_id)
+                self._send_json({'history': history})
+            
+            elif path.startswith('/machine/'):
+                # Check web authentication for machine detail page
+                if not self._check_web_auth():
+                    self._send_auth_required()
+                    return
+                # Serve machine detail page
+                machine_id = path.split('/')[-1]
+                self._send_html(get_machine_detail_html(machine_id))
+            
+            elif path.startswith('/api/fleet/commands/'):
+                # Get pending commands for agent polling
+                machine_id = path.split('/')[-1]
+                if hasattr(self.data_store, 'get_pending_commands'):
+                    commands = self.data_store.get_pending_commands(machine_id)
+                    self._send_json({'commands': commands})
+                else:
+                    self._send_json({'commands': []})
+            
+            elif path.startswith('/api/fleet/recent-commands/'):
+                # Check web authentication for API used by web UI
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                # Get recent commands for UI display (by machine_id or serial number)
+                identifier = path.split('/')[-1]
+                
+                # Try to resolve serial number to machine_id
+                machine_id = identifier
+                machine = self.data_store.get_machine(identifier)
+                if not machine:
+                    all_machines = self.data_store.get_all_machines()
+                    for m in all_machines:
+                        if m.get('info', {}).get('serial_number') == identifier:
+                            machine_id = m['machine_id']
+                            break
+                
+                if hasattr(self.data_store, 'get_recent_commands'):
+                    commands = self.data_store.get_recent_commands(machine_id)
+                    self._send_json({'commands': commands})
+                else:
+                    self._send_json({'commands': []})
+            
+            elif path == '/api/fleet/current-user':
+                # Get current logged-in user info
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Extract username from Authorization header
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Basic '):
+                    import base64
+                    try:
+                        credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+                        username = credentials.split(':')[0]
+                        
+                        # Get user details
+                        from .fleet_user_manager import FleetUserManager
+                        user_manager = FleetUserManager()
+                        users = user_manager.list_users()
+                        
+                        for user in users:
+                            if user['username'] == username:
+                                self._send_json({
+                                    'username': user['username'],
+                                    'role': user['role']
+                                })
+                                return
+                        
+                        self._send_json({'username': username, 'role': 'unknown'})
+                    except (ValueError, KeyError, IndexError):
+                        self._send_json({'username': 'unknown', 'role': 'unknown'})
+                else:
+                    self._send_json({'username': 'guest', 'role': 'viewer'})
+            
+            elif path == '/api/fleet/users/check-password-update':
+                # Check if current user's password needs update
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Extract username from Authorization header
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Basic '):
+                    import base64
+                    try:
+                        credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+                        username = credentials.split(':')[0]
+                        
+                        from .fleet_user_manager import FleetUserManager
+                        user_manager = FleetUserManager()
+                        needs_update, reason = user_manager.check_password_needs_update(username)
+                        
+                        self._send_json({
+                            'needs_update': needs_update,
+                            'reason': reason
+                        })
+                    except (ValueError, KeyError, IndexError, UnicodeDecodeError):
+                        self._send_json({'needs_update': False})
+                else:
+                    self._send_json({'needs_update': False})
+            
+            elif path == '/api/fleet/users':
+                # Get list of users
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                users = user_manager.list_users()
+                self._send_json({'users': users})
+            
+            elif path.startswith('/api/fleet/speedtest'):
+                # Speed test aggregation endpoints
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                from urllib.parse import parse_qs, urlparse
+                from .fleet_speedtest_aggregator import SpeedTestAggregator
+                
+                parsed = urlparse(self.path)
+                params = parse_qs(parsed.query)
+                aggregator = SpeedTestAggregator()
+                
+                if path == '/api/fleet/speedtest/summary':
+                    # Fleet-wide summary
+                    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+                    summary = aggregator.get_fleet_summary(hours)
+                    self._send_json(summary)
+                
+                elif path == '/api/fleet/speedtest/machine':
+                    # Machine-specific stats
+                    machine_id = params.get('machine_id', [None])[0]
+                    hours = safe_int_param(params, 'hours', 168, max_val=8760)
+                    
+                    if not machine_id:
+                        self._send_json({'error': 'Missing machine_id'}, 400)
+                        return
+                    
+                    stats = aggregator.get_machine_stats(machine_id, hours)
+                    self._send_json(stats)
+                
+                elif path == '/api/fleet/speedtest/comparison':
+                    # Comparison report
+                    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+                    report = aggregator.get_comparison_report(hours)
+                    self._send_json(report)
+                
+                elif path == '/api/fleet/speedtest/anomalies':
+                    # Anomaly detection
+                    machine_id = params.get('machine_id', [None])[0]
+                    
+                    if not machine_id:
+                        self._send_json({'error': 'Missing machine_id'}, 400)
+                        return
+                    
+                    anomalies = aggregator.detect_anomalies(machine_id)
+                    self._send_json({'anomalies': anomalies, 'count': len(anomalies)})
+                
+                elif path == '/api/fleet/speedtest/recent':
+                    # Recent results
+                    machine_id = params.get('machine_id', [None])[0]
+                    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+                    limit = safe_int_param(params, 'limit', 100, max_val=10000)
+                    
+                    results = aggregator.get_recent_results(machine_id, hours, limit)
+                    self._send_json({'results': results, 'count': len(results)})
+                
+                elif path == '/api/fleet/speedtest/recent20':
+                    # Average of recent 20 tests per machine
+                    machine_id = params.get('machine_id', [None])[0]
+                    
+                    results = aggregator.get_recent_20_average(machine_id)
+                    self._send_json(results)
+                
+                elif path == '/api/fleet/speedtest/subnet':
+                    # Subnet analysis
+                    subnet = params.get('subnet', [None])[0]
+                    
+                    analysis = aggregator.get_subnet_analysis(subnet)
+                    self._send_json(analysis)
+                
+                else:
+                    self._send_json({'error': 'Unknown speedtest endpoint'}, 404)
+            
+            elif path.startswith('/api/fleet/widget-logs'):
+                # Get widget logs (with optional filtering)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Parse query parameters
+                from urllib.parse import parse_qs, urlparse
+                parsed = urlparse(self.path)
+                params = parse_qs(parsed.query)
+                
+                machine_id = params.get('machine_id', [None])[0]
+                widget_type = params.get('widget_type', [None])[0]
+                limit = safe_int_param(params, 'limit', 100, max_val=10000)
+                
+                if hasattr(self.data_store, 'get_widget_logs'):
+                    logs = self.data_store.get_widget_logs(machine_id, limit, widget_type)
+                    self._send_json({'logs': logs, 'count': len(logs)})
+                else:
+                    self._send_json({'logs': [], 'count': 0})
+            
+            elif path == '/api/fleet/download-installer':
+                # Download agent installer package
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                try:
+                    # Import the builder
+                    from .fleet_agent_builder import AgentPackageBuilder
+                    
+                    # Load config
+                    config_path = Path.home() / ".fleet-config.json"
+                    if not config_path.exists():
+                        self._send_json({'error': 'Server not configured. Run setup wizard first.'}, 500)
+                        return
+                    
+                    # Build installer package
+                    builder = AgentPackageBuilder(config_path)
+                    package_path = builder.build_package()
+                    
+                    # Send the file
+                    with open(package_path, 'rb') as f:
+                        content = f.read()
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/zip')
+                    self.send_header('Content-Disposition', f'attachment; filename="{package_path.name}"')
+                    self.send_header('Content-Length', len(content))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    
+                    # Clean up temp file
+                    package_path.unlink()
+                    
+                except Exception as e:
+                    logger.error(f"Error generating installer: {e}", exc_info=True)
+                    self._send_json({'error': f'Failed to generate installer: {str(e)}'}, 500)
+            
+            elif path == '/api/fleet/e2ee-status':
+                # Check if E2EE encryption key is configured (GET version for settings page)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                has_key = self.encryption is not None and self.encryption.enabled
+                self._send_json({
+                    'success': True,
+                    'has_key': has_key,
+                    'status': 'enabled' if has_key else 'disabled'
+                })
+            
+            elif path == '/api/fleet/network-analysis':
+                # Fleet-wide network analysis
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                # Parse query parameters
+                query_string = self.path.split('?')[1] if '?' in self.path else ''
+                params = urllib.parse.parse_qs(query_string)
+                hours = safe_int_param(params, 'hours', 24, max_val=8760)
+                analyzer = FleetNetworkAnalyzer(self.data_store)
+                report = analyzer.analyze_fleet(hours=hours)
+                self._send_json(report)
+            
+            elif path.startswith('/api/fleet/network-analysis/'):
+                # Machine-specific network analysis
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                # Parse query parameters
+                query_string = self.path.split('?')[1] if '?' in self.path else ''
+                params = urllib.parse.parse_qs(query_string)
+                machine_id = path.split('/')[-1]
+                hours = safe_int_param(params, 'hours', 24, max_val=8760)
+                analyzer = FleetNetworkAnalyzer(self.data_store)
+                report = analyzer.analyze_machine(machine_id, hours=hours)
+                self._send_json(report)
+            
+            elif path == '/network-analysis':
+                # Fleet network analysis dashboard page
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self.send_response(302)
+                    self.send_header('Location', '/login')
+                    self.end_headers()
+                    return
+                
+                from .fleet_network_analysis_page import get_fleet_network_analysis_page
+                self._send_html(get_fleet_network_analysis_page())
+            
+            else:
+                self.send_error(404, "Not found")
+        
+        except Exception as e:
+            logger.error(f"Error handling GET: {e}", exc_info=True)
+            self._send_json({'error': 'Internal server error'}, 500)
+    
+    def do_POST(self):
+        """Handle POST requests - dispatches to router (Phase 4 Stage 5)"""
+        # Rate limiting check (Phase 4 Security)
+        if self.rate_limiter:
+            client_ip = self.client_address[0]
+            if not self.rate_limiter.is_allowed(client_ip):
+                self._send_json({'error': 'Rate limit exceeded. Please try again later.'}, 429)
+                return
+
+        if self.router:
+            self.router.dispatch(self, 'POST', self.path)
+        else:
+            # Fallback if router not initialized
+            logger.error("Router not initialized!")
+            self.send_error(503, "Service Unavailable - Router not initialized")
+
+    def do_POST_OLD_MONOLITHIC(self):
+        """OLD IMPLEMENTATION - Kept for reference during migration
+        TODO: Remove after Stage 5 testing complete"""
+        path = self.path.split('?')[0]
+
+        try:
+            if path == '/login':
+                # Handle login form submission
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                
+                # Parse form data
+                params = urllib.parse.parse_qs(body)
+                username = params.get('username', [''])[0]
+                password = params.get('password', [''])[0]
+                
+                if not username or not password:
+                    touchid_available = check_touchid_available()
+                    self._send_html(generate_login_page("Username and password are required", touchid_available=touchid_available))
+                    return
+                
+                # Authenticate user
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                client_ip = self.client_address[0]
+                success, message = user_manager.authenticate(username, password, client_ip)
+                
+                if not success:
+                    touchid_available = check_touchid_available()
+                    self._send_html(generate_login_page(message, touchid_available=touchid_available))
+                    return
+                
+                # Check if password needs update
+                needs_update, reason = user_manager.check_password_needs_update(username)
+                
+                # Create session
+                session_token = user_manager.create_session(username)
+                
+                # Set cookie and redirect
+                if needs_update:
+                    redirect_url = '/password-reset'
+                else:
+                    redirect_url = '/dashboard'
+                
+                self.send_response(302)
+                self.send_header('Location', redirect_url)
+                self.send_header('Set-Cookie', f'fleet_session={session_token}; Path=/; Max-Age=28800; HttpOnly; SameSite=Strict; Secure')
+                self.end_headers()
+            
+            elif path == '/reset-password':
+                # Handle password reset form submission
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                new_password = data.get('new_password')
+                
+                if not new_password:
+                    self._send_json({'success': False, 'message': 'New password is required'})
+                    return
+                
+                # Update password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.force_password_update(
+                    username=username,
+                    new_password=new_password,
+                    updated_by=username
+                )
+                
+                self._send_json({'success': success, 'message': message})
+            
+            elif path == '/api/fleet/report':
+                # Check authentication
+                if not self._check_auth():
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Read and parse body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                # Decrypt payload if it's encrypted
+                e2ee_verified = False
+                if data.get('encrypted') and self.encryption:
+                    try:
+                        data = self.encryption.decrypt_payload(data)
+                        e2ee_verified = True  # Successfully decrypted - keys match!
+                        logger.debug("Successfully decrypted agent payload")
+                    except Exception as e:
+                        logger.error(f"Failed to decrypt payload: {e}")
+                        self._send_json({'error': 'Decryption failed', 'e2ee_verified': False}, 400)
+                        return
+                elif data.get('encrypted') and not self.encryption:
+                    logger.error("Received encrypted payload but no encryption key configured!")
+                    self._send_json({'error': 'Server not configured for encryption', 'e2ee_verified': False}, 500)
+                    return
+                
+                # Extract data
+                machine_id = data.get('machine_id')
+                machine_info = data.get('machine_info', {})
+                metrics = data.get('metrics', {})
+                
+                if not machine_id:
+                    self._send_json({'error': 'Missing machine_id'}, 400)
+                    return
+                
+                # Store data with E2EE status
+                machine_info['e2ee_enabled'] = e2ee_verified
+                self.data_store.update_machine(machine_id, machine_info, metrics)
+
+                # Store enhanced metrics (Phase 1 & 2)
+                self.data_store.store_enhanced_metrics(machine_id, metrics)
+
+                # Return response with E2EE verification status
+                self._send_json({'status': 'ok', 'e2ee_verified': e2ee_verified})
+            
+            elif path.startswith('/api/fleet/command/') and path.endswith('/ack'):
+                # Agent acknowledging command execution
+                if not self._check_auth():
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Read and parse body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                command_id = data.get('id')
+                status = data.get('status', 'completed')
+                result = data.get('result', {})
+                
+                if not command_id:
+                    self._send_json({'error': 'Missing command id'}, 400)
+                    return
+                
+                if hasattr(self.data_store, 'acknowledge_command'):
+                    self.data_store.acknowledge_command(command_id, status, result)
+                
+                self._send_json({'status': 'ok'})
+            
+            elif path.startswith('/api/fleet/command/'):
+                # Create new command from UI - requires web authentication
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Extract machine_id from path
+                parts = path.split('/')
+                if len(parts) >= 5:
+                    machine_id = parts[4]
+                else:
+                    self._send_json({'error': 'Invalid path'}, 400)
+                    return
+                
+                # Read and parse body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                action = data.get('action')
+                params = data.get('params', {})
+                
+                if not action:
+                    self._send_json({'error': 'Missing action'}, 400)
+                    return
+                
+                if hasattr(self.data_store, 'create_command'):
+                    command_id = self.data_store.create_command(machine_id, action, params)
+                    self._send_json({'command_id': command_id, 'status': 'created'})
+                else:
+                    self._send_json({'error': 'Commands not supported'}, 501)
+            
+            elif '/api/fleet/command/' in path and path.endswith('/ack'):
+                # Command acknowledgment from agent
+                # Path: /api/fleet/command/{machine_id}/ack
+                parts = path.replace('/api/fleet/command/', '').replace('/ack', '')
+                machine_id = parts
+                
+                if not self._check_auth():
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                command_id = data.get('id')
+                status = data.get('status', 'unknown')
+                result = data.get('result', {})
+                
+                if not command_id:
+                    self._send_json({'error': 'Missing command id'}, 400)
+                    return
+                
+                # Store acknowledgment
+                if hasattr(self.data_store, 'acknowledge_command'):
+                    self.data_store.acknowledge_command(command_id, status, result)
+                    
+                    # Log key rotation confirmations specially
+                    action = result.get('message', '')
+                    if 'encryption key rotated' in action.lower() or 'key rotation' in action.lower():
+                        logger.info(f"Key rotation confirmed by {machine_id}: {status}")
+                    
+                    self._send_json({'success': True, 'message': 'Command acknowledged'})
+                else:
+                    self._send_json({'error': 'Acknowledgment storage not available'}, 501)
+            
+            elif path == '/api/fleet/update-certificate':
+                # Update SSL certificate
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                try:
+                    # Parse multipart form data
+                    import cgi
+                    from io import BytesIO
+                    
+                    content_type = self.headers.get('Content-Type', '')
+                    if not content_type.startswith('multipart/form-data'):
+                        self._send_json({'success': False, 'error': 'Invalid content type'}, 400)
+                        return
+                    
+                    # Parse form data
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length)
+                    
+                    # Create environment for cgi.FieldStorage
+                    environ = {
+                        'REQUEST_METHOD': 'POST',
+                        'CONTENT_TYPE': content_type,
+                        'CONTENT_LENGTH': str(content_length)
+                    }
+                    
+                    form = cgi.FieldStorage(
+                        fp=BytesIO(body),
+                        environ=environ,
+                        keep_blank_values=True
+                    )
+                    
+                    # Get certificate and key files
+                    if 'certificate' not in form or 'private_key' not in form:
+                        self._send_json({'success': False, 'error': 'Missing certificate or private key'}, 400)
+                        return
+                    
+                    cert_data = form['certificate'].file.read()
+                    key_data = form['private_key'].file.read()
+                    
+                    # Update certificate
+                    from .fleet_cert_manager import CertificateManager
+                    manager = CertificateManager()
+                    success, result = manager.update_certificate(cert_data, key_data)
+                    
+                    if success:
+                        self._send_json({'success': True, 'message': result.get('message'), 'cert_info': result.get('cert_info')})
+                        logger.info("SSL certificate updated successfully")
+                    else:
+                        self._send_json({'success': False, 'error': result}, 400)
+                
+                except Exception as e:
+                    logger.error(f"Error updating certificate: {e}", exc_info=True)
+                    self._send_json({'success': False, 'error': str(e)}, 500)
+            
+            elif path == '/api/fleet/generate-loadbalancer':
+                # Generate load balancer package (standalone feature)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                try:
+                    # Read configuration
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length)
+                    request_data = json.loads(body.decode())
+                    
+                    port = request_data.get('port', 8778)
+                    package_name = request_data.get('package_name', 'FleetLoadBalancer.tar.gz')
+                    
+                    from .loadbalancer_builder import build_loadbalancer_package
+                    import tempfile
+                    
+                    # Get cluster nodes if available
+                    node_list = []
+                    
+                    if self.cluster_manager and self.cluster_manager.enabled:
+                        # Get active cluster nodes
+                        nodes = self.cluster_manager.get_active_nodes()
+                        for node in nodes:
+                            node_list.append({
+                                'id': node.node_id,
+                                'host': node.host,
+                                'port': 8778
+                            })
+                        logger.info(f"Generating load balancer for {len(node_list)} cluster nodes")
+                    else:
+                        # Standalone mode - generate template for future use
+                        # Use current server as example node
+                        import socket
+                        hostname = socket.gethostname()
+                        try:
+                            local_ip = socket.gethostbyname(hostname)
+                        except (socket.gaierror, socket.herror, OSError):
+                            local_ip = '127.0.0.1'
+                        
+                        node_list.append({
+                            'id': 'server-01',
+                            'host': local_ip,
+                            'port': 8778
+                        })
+                        logger.info("Generating load balancer template for standalone server (future clustering)")
+                    
+                    # Build load balancer package
+                    temp_dir = Path(tempfile.mkdtemp(prefix='lb_pkg_'))
+                    output_path = temp_dir / package_name
+
+                    success, message = build_loadbalancer_package(
+                        output_path=str(output_path),
+                        nodes=node_list,
+                        port=port,
+                        name='fleet-lb'
+                    )
+
+                    if success and output_path.exists():
+                        # Send the file
+                        with open(output_path, 'rb') as f:
+                            content = f.read()
+                        
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/gzip')
+                        self.send_header('Content-Disposition', f'attachment; filename="{package_name}"')
+                        self.send_header('Content-Length', len(content))
+                        self.end_headers()
+                        self.wfile.write(content)
+                        
+                        logger.info(f"Load balancer package generated: {package_name}")
+                        
+                        # Clean up
+                        try:
+                            import shutil
+                            shutil.rmtree(temp_dir)
+                        except (OSError, IOError, PermissionError):
+                            pass
+                    else:
+                        self._send_json({'error': message or 'Failed to build load balancer package'}, 500)
+                
+                except Exception as e:
+                    logger.error(f"Error generating load balancer package: {e}", exc_info=True)
+                    self._send_json({'error': f'Failed to generate load balancer package: {str(e)}'}, 500)
+            
+            elif path == '/api/fleet/build-standalone-package' or path == '/api/fleet/build-agent-package':
+                # Build customized agent package (fleet-linked or standalone)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                try:
+                    # Read configuration
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length)
+                    config = json.loads(body.decode())
+                    
+                    # Import builder
+                    from .fleet_agent_builder import AgentPackageBuilder
+                    
+                    # Load server config
+                    config_path = Path.home() / ".fleet-config.json"
+                    
+                    # Check if standalone mode requested
+                    is_standalone = config.get('standalone', False)
+                    
+                    if is_standalone:
+                        # Build standalone package (no server credentials)
+                        # Standalone doesn't require server config
+                        builder = AgentPackageBuilder(config_path)
+                        standalone_options = config.get('standalone_options', {
+                            'include_setup_wizard': True,
+                            'include_menubar': True
+                        })
+                        package_path = builder.build_standalone_package(
+                            widget_config=config.get('widgets'),
+                            tool_config=config.get('tools'),
+                            standalone_options=standalone_options
+                        )
+                    else:
+                        # Build fleet-linked package (with server credentials)
+                        builder = AgentPackageBuilder(config_path)
+                        package_path = builder.build_package(
+                            widget_config=config.get('widgets'),
+                            tool_config=config.get('tools')
+                        )
+                    
+                    # Send the file
+                    with open(package_path, 'rb') as f:
+                        content = f.read()
+                    
+                    # Use appropriate content type based on file extension
+                    filename = package_path.name
+                    if filename.endswith('.pkg'):
+                        content_type = 'application/vnd.apple.installer+xml'
+                    elif filename.endswith('.zip'):
+                        content_type = 'application/zip'
+                    else:
+                        content_type = 'application/octet-stream'
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Content-Length', len(content))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    
+                    # Clean up temp file
+                    package_path.unlink()
+                    
+                except Exception as e:
+                    logger.error(f"Error building agent package: {e}", exc_info=True)
+                    self._send_json({'error': f'Failed to build package: {str(e)}'}, 500)
+            
+            elif path == '/api/fleet/build-cluster-package':
+                # Build cluster node installer package (and optionally load balancer)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                try:
+                    # Check if cluster mode is enabled
+                    if not self.cluster_manager or not self.cluster_manager.enabled:
+                        self._send_json({'error': 'Cluster mode not enabled'}, 400)
+                        return
+                    
+                    # Read configuration
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length)
+                    request_data = json.loads(body.decode())
+                    
+                    node_name = request_data.get('node_name')
+                    package_name = request_data.get('package_name', 'FleetServerClusterNode.pkg')
+                    include_loadbalancer = request_data.get('include_loadbalancer', False)
+                    lb_port = request_data.get('lb_port', 8778)
+                    
+                    # Load current server configuration
+                    # Try to get config from various sources
+                    server_config = {}
+                    
+                    # Option 1: Try to get from cluster manager
+                    if hasattr(self.cluster_manager, 'config'):
+                        server_config = self.cluster_manager.config
+                    
+                    # Option 2: Build config from current settings
+                    if not server_config:
+                        server_config = {
+                            'server': {
+                                'port': getattr(self, 'port', 8778),
+                                'api_key': self.api_key,
+                                'web_username': self.web_username,
+                                'web_password': self.web_password,
+                            },
+                            'cluster': {
+                                'enabled': True,
+                                'backend': self.cluster_manager.backend if self.cluster_manager else 'redis',
+                            }
+                        }
+                        
+                        # Add cluster config if available
+                        if self.cluster_manager:
+                            server_config['cluster'].update({
+                                'redis_host': getattr(self.cluster_manager, 'redis_host', None),
+                                'redis_port': getattr(self.cluster_manager, 'redis_port', 6379),
+                                'redis_password': getattr(self.cluster_manager, 'redis_password', None),
+                                'heartbeat_interval': self.cluster_manager.heartbeat_interval,
+                                'node_timeout': self.cluster_manager.node_timeout,
+                            })
+                    
+                    # Import cluster package builder
+                    from .cluster_pkg_builder import build_cluster_node_package
+                    import tempfile
+
+                    # Build package in temp directory
+                    temp_dir = Path(tempfile.mkdtemp(prefix='cluster_pkg_'))
+                    output_path = temp_dir / package_name
+
+                    success, message = build_cluster_node_package(
+                        server_config=server_config,
+                        output_path=str(output_path),
+                        node_name=node_name
+                    )
+
+                    if not success or not output_path.exists():
+                        self._send_json({'error': message or 'Failed to build node package'}, 500)
+                        return
+                    
+                    # Build load balancer package if requested
+                    lb_output_path = None
+                    if include_loadbalancer:
+                        from .loadbalancer_builder import build_loadbalancer_package
+                        
+                        # Get all cluster nodes
+                        nodes = self.cluster_manager.get_active_nodes()
+                        node_list = []
+                        for node in nodes:
+                            node_list.append({
+                                'id': node.node_id,
+                                'host': node.host,
+                                'port': 8778
+                            })
+                        
+                        lb_package_name = 'FleetLoadBalancer.tar.gz'
+                        lb_output_path = temp_dir / lb_package_name
+
+                        lb_success, lb_message = build_loadbalancer_package(
+                            output_path=str(lb_output_path),
+                            nodes=node_list,
+                            port=lb_port,
+                            name='fleet-lb'
+                        )
+
+                        if not lb_success:
+                            logger.warning(f"Load balancer package build failed: {lb_message}")
+                            lb_output_path = None
+
+                    # If both packages built, create ZIP
+                    if lb_output_path and lb_output_path.exists():
+                        import zipfile
+
+                        zip_name = 'FleetClusterPackages.zip'
+                        zip_path = temp_dir / zip_name
+                        
+                        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                            zipf.write(output_path, arcname=package_name)
+                            zipf.write(lb_output_path, arcname=lb_package_name)
+                            
+                            # Add README
+                            readme = f"""Fleet Server Cluster Packages
+
+This ZIP contains:
+1. {package_name} - Cluster node installer (install on Mac servers)
+2. {lb_package_name} - Load balancer config (deploy on Linux/Docker)
+
+Quick Start:
+1. Install node package on each Mac server
+2. Extract and deploy load balancer package
+3. Access via load balancer at http://<lb-ip>:{lb_port}
+
+See README.md in load balancer package for details.
+"""
+                            zipf.writestr('README.txt', readme)
+                        
+                        # Send ZIP
+                        with open(zip_path, 'rb') as f:
+                            content = f.read()
+                        
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/zip')
+                        self.send_header('Content-Disposition', f'attachment; filename="{zip_name}"')
+                        self.send_header('Content-Length', len(content))
+                        self.end_headers()
+                        self.wfile.write(content)
+                        
+                        logger.info(f"Cluster packages built: node + load balancer")
+                    else:
+                        # Just send node package
+                        with open(output_path, 'rb') as f:
+                            content = f.read()
+                        
+                        # Use appropriate content type for .pkg files
+                        content_type = 'application/vnd.apple.installer+xml' if package_name.endswith('.pkg') else 'application/octet-stream'
+                        
+                        self.send_response(200)
+                        self.send_header('Content-Type', content_type)
+                        self.send_header('Content-Disposition', f'attachment; filename="{package_name}"')
+                        self.send_header('Content-Length', len(content))
+                        self.end_headers()
+                        self.wfile.write(content)
+                        
+                        logger.info(f"Cluster node package built: {package_name}")
+                    
+                    # Clean up
+                    try:
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                    except (OSError, IOError, PermissionError):
+                        pass
+                
+                except Exception as e:
+                    logger.error(f"Error building cluster package: {e}", exc_info=True)
+                    self._send_json({'error': f'Failed to build cluster package: {str(e)}'}, 500)
+            
+            elif path == '/api/fleet/widget-logs':
+                # Store widget logs from machines
+                if not self._check_auth():
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                # Read and parse body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                # Decrypt payload if it's encrypted
+                if data.get('encrypted') and self.encryption:
+                    try:
+                        data = self.encryption.decrypt_payload(data)
+                        logger.debug("Successfully decrypted widget logs payload")
+                    except Exception as e:
+                        logger.error(f"Failed to decrypt widget logs: {e}")
+                        self._send_json({'error': 'Decryption failed'}, 400)
+                        return
+                elif data.get('encrypted') and not self.encryption:
+                    logger.error("Received encrypted widget logs but no encryption key configured!")
+                    self._send_json({'error': 'Server not configured for encryption'}, 500)
+                    return
+                
+                machine_id = data.get('machine_id')
+                logs = data.get('logs', [])
+                
+                if not machine_id:
+                    self._send_json({'error': 'Missing machine_id'}, 400)
+                    return
+                
+                if not logs:
+                    self._send_json({'error': 'No logs provided'}, 400)
+                    return
+                
+                # Store logs
+                if hasattr(self.data_store, 'store_widget_logs'):
+                    self.data_store.store_widget_logs(machine_id, logs)
+                    
+                    # Also aggregate speed test results
+                    try:
+                        from .fleet_speedtest_aggregator import SpeedTestAggregator
+                        aggregator = SpeedTestAggregator()
+                        
+                        speedtest_count = 0
+                        for log in logs:
+                            if log.get('widget_type') == 'speedtest' and log.get('data'):
+                                aggregator.store_speedtest_result(machine_id, log['data'])
+                                speedtest_count += 1
+                        
+                        if speedtest_count > 0:
+                            logger.info(f"Aggregated {speedtest_count} speed test results from {machine_id}")
+                    except Exception as e:
+                        logger.error(f"Error aggregating speed tests: {e}")
+                    
+                    self._send_json({'status': 'ok', 'logs_stored': len(logs)})
+                else:
+                    self._send_json({'error': 'Widget logs not supported'}, 501)
+            
+            elif path == '/api/fleet/users/create':
+                # Create new user
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.create_user(
+                    username=data.get('username'),
+                    password=data.get('password'),
+                    role=data.get('role', 'admin'),
+                    created_by=self.headers.get('Authorization', 'unknown')
+                )
+                
+                self._send_json({'success': success, 'message': message})
+            
+            elif path == '/api/fleet/users/change-password':
+                # Change password
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                # Get username from basic auth
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Basic '):
+                    import base64
+                    credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+                    username = credentials.split(':')[0]
+                else:
+                    self._send_json({'success': False, 'message': 'Unable to identify user'}, 400)
+                    return
+                
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.change_password(
+                    username=username,
+                    old_password=data.get('current_password'),
+                    new_password=data.get('new_password')
+                )
+                
+                self._send_json({'success': success, 'message': message})
+            
+            elif path == '/api/fleet/users/delete':
+                # Delete user
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.delete_user(
+                    username=data.get('username'),
+                    deleted_by=self.headers.get('Authorization', 'unknown')
+                )
+                
+                self._send_json({'success': success, 'message': message})
+            
+            elif path == '/api/fleet/users/force-update-password':
+                # Force update current user's password (for legacy password migration)
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'error': 'Unauthorized'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                # Get username from basic auth
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Basic '):
+                    import base64
+                    credentials = base64.b64decode(auth_header[6:]).decode('utf-8')
+                    username = credentials.split(':')[0]
+                else:
+                    self._send_json({'success': False, 'message': 'Unable to identify user'}, 400)
+                    return
+                
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.force_password_update(
+                    username=username,
+                    new_password=data.get('new_password'),
+                    updated_by=username
+                )
+                
+                self._send_json({'success': success, 'message': message})
+            
+            elif path == '/api/fleet/verify-and-get-key':
+                # Verify password and return API key
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if success:
+                    # Return the API key
+                    self._send_json({
+                        'success': True,
+                        'api_key': self.api_key if self.api_key else 'No API key configured'
+                    })
+                else:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+            
+            elif path == '/api/fleet/regenerate-key':
+                # Regenerate API key (requires password verification)
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if not success:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+                    return
+                
+                # Generate new API key
+                import secrets
+                new_api_key = secrets.token_urlsafe(32)
+                
+                # Update the API key in the config file
+                config_path = Path.home() / '.fleet-config.json'
+                try:
+                    if config_path.exists():
+                        with open(config_path, 'r') as f:
+                            config = json.load(f)
+                    else:
+                        config = {}
+                    
+                    config['api_key'] = new_api_key
+                    
+                    with open(config_path, 'w') as f:
+                        json.dump(config, f, indent=2)
+                    
+                    # Update the server's API key
+                    self.api_key = new_api_key
+                    
+                    logger.info(f"API key regenerated by user: {username}")
+                    
+                    self._send_json({
+                        'success': True,
+                        'new_api_key': new_api_key,
+                        'message': 'API key regenerated successfully'
+                    })
+                except Exception as e:
+                    logger.error(f"Error regenerating API key: {e}")
+                    self._send_json({'success': False, 'message': f'Error: {str(e)}'})
+            
+            elif path == '/api/fleet/e2ee-status':
+                # Check if E2EE encryption key is configured
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                has_key = self.encryption is not None and self.encryption.enabled
+                self._send_json({
+                    'success': True,
+                    'has_key': has_key,
+                    'status': 'enabled' if has_key else 'disabled'
+                })
+            
+            elif path == '/api/fleet/key-rotation-status':
+                # Get key rotation command status for all machines
+                is_authenticated, _ = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                rotation_status = []
+                if hasattr(self.data_store, 'get_recent_commands'):
+                    machines = self.data_store.get_all_machines()
+                    for machine in machines:
+                        machine_id = machine.get('machine_id')
+                        hostname = machine.get('info', {}).get('hostname', machine_id[:8])
+                        
+                        # Get recent key rotation commands
+                        commands = self.data_store.get_recent_commands(machine_id, limit=5)
+                        for cmd in commands:
+                            if cmd.get('action') == 'rotate_encryption_key':
+                                rotation_status.append({
+                                    'machine_id': machine_id,
+                                    'hostname': hostname,
+                                    'status': cmd.get('status', 'pending'),
+                                    'created_at': cmd.get('created_at'),
+                                    'executed_at': cmd.get('executed_at'),
+                                    'result': cmd.get('result', {})
+                                })
+                                break  # Only get most recent rotation command per machine
+                
+                self._send_json({
+                    'success': True,
+                    'rotations': rotation_status
+                })
+            
+            elif path == '/api/fleet/verify-and-get-encryption-key':
+                # Verify password and return E2EE encryption key
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if success:
+                    # Get encryption key from config
+                    encryption_key = self._get_encryption_key_from_config()
+                    if encryption_key:
+                        self._send_json({
+                            'success': True,
+                            'encryption_key': encryption_key
+                        })
+                    else:
+                        self._send_json({
+                            'success': False,
+                            'message': 'No encryption key configured'
+                        })
+                else:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+            
+            elif path == '/api/fleet/generate-encryption-key':
+                # Generate new E2EE encryption key
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if not success:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+                    return
+                
+                # Generate new encryption key
+                try:
+                    from .encryption import DataEncryption
+                    new_key = DataEncryption.generate_key()
+                    
+                    # Save to config
+                    self._save_encryption_key_to_config(new_key)
+                    
+                    # Update server's encryption handler
+                    self.encryption = DataEncryption(new_key)
+                    FleetServerHandler.encryption = self.encryption
+                    
+                    logger.info(f"E2EE encryption key generated by user: {username}")
+                    
+                    self._send_json({
+                        'success': True,
+                        'encryption_key': new_key,
+                        'message': 'Encryption key generated successfully'
+                    })
+                except Exception as e:
+                    logger.error(f"Error generating encryption key: {e}")
+                    self._send_json({'success': False, 'message': f'Error: {str(e)}'})
+            
+            elif path == '/api/fleet/regenerate-encryption-key':
+                # Regenerate E2EE encryption key (same as generate but for existing keys)
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if not success:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+                    return
+                
+                # Generate new encryption key
+                try:
+                    from .encryption import DataEncryption
+                    new_key = DataEncryption.generate_key()
+                    
+                    # Save to config
+                    self._save_encryption_key_to_config(new_key)
+                    
+                    # Update server's encryption handler
+                    self.encryption = DataEncryption(new_key)
+                    FleetServerHandler.encryption = self.encryption
+                    
+                    logger.info(f"E2EE encryption key regenerated by user: {username}")
+                    
+                    self._send_json({
+                        'success': True,
+                        'encryption_key': new_key,
+                        'message': 'Encryption key regenerated successfully'
+                    })
+                except Exception as e:
+                    logger.error(f"Error regenerating encryption key: {e}")
+                    self._send_json({'success': False, 'message': f'Error: {str(e)}'})
+            
+            elif path == '/api/fleet/rotate-encryption-key':
+                # Rotate encryption key to all connected agents (remote update)
+                is_authenticated, username = self._check_web_auth()
+                if not is_authenticated:
+                    self._send_json({'success': False, 'message': 'Not authenticated'}, 401)
+                    return
+                
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode())
+                
+                password = data.get('password')
+                
+                if not password:
+                    self._send_json({'success': False, 'message': 'Password is required'})
+                    return
+                
+                # Verify password
+                from .fleet_user_manager import FleetUserManager
+                user_manager = FleetUserManager()
+                
+                success, message = user_manager.authenticate(username, password)
+                
+                if not success:
+                    self._send_json({'success': False, 'message': 'Incorrect password'})
+                    return
+                
+                # Check if E2EE is currently enabled
+                if not self.encryption or not self.encryption.enabled:
+                    self._send_json({'success': False, 'message': 'E2EE is not currently enabled. Generate a key first.'})
+                    return
+                
+                try:
+                    from .encryption import DataEncryption
+                    import uuid
+                    
+                    # Generate new key
+                    new_key = DataEncryption.generate_key()
+                    
+                    # Encrypt new key with OLD key for secure transmission
+                    encrypted_new_key = self.encryption.encrypt_payload({'new_key': new_key})
+                    
+                    # Queue rotate command for all connected machines
+                    machines = self.data_store.get_all_machines()
+                    queued_count = 0
+                    
+                    for machine_id in machines:
+                        command = {
+                            'id': str(uuid.uuid4()),
+                            'action': 'rotate_encryption_key',
+                            'params': {'encrypted_new_key': encrypted_new_key},
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        self.data_store.add_pending_command(machine_id, command)
+                        queued_count += 1
+                        logger.info(f"Queued key rotation command for {machine_id}")
+                    
+                    # Save new key to server config
+                    self._save_encryption_key_to_config(new_key)
+                    
+                    # Update server's encryption handler with new key
+                    self.encryption = DataEncryption(new_key)
+                    FleetServerHandler.encryption = self.encryption
+                    
+                    logger.info(f"E2EE key rotation initiated by {username} - {queued_count} agents queued")
+                    
+                    self._send_json({
+                        'success': True,
+                        'encryption_key': new_key,
+                        'agents_queued': queued_count,
+                        'message': f'Key rotation queued for {queued_count} agent(s). Agents will update on next poll.'
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Error rotating encryption key: {e}")
+                    self._send_json({'success': False, 'message': f'Error: {str(e)}'})
+            
+            elif path == '/api/fleet/logout':
+                # Logout endpoint - returns 401 to clear credentials
+                self.send_response(401)
+                self.send_header('WWW-Authenticate', 'Basic realm="Fleet Dashboard"')
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'message': 'Logged out'}).encode())
+            
+            else:
+                self.send_error(404, "Not found")
+        
+        except json.JSONDecodeError:
+            self._send_json({'error': 'Invalid JSON'}, 400)
+        except Exception as e:
+            logger.error(f"Error handling POST: {e}", exc_info=True)
+            self._send_json({'error': 'Internal server error'}, 500)
+
+
+def get_fleet_dashboard_html() -> str:
+    """Generate fleet dashboard HTML with modern UX/UI
+
+    Enhanced with:
+    - Accessibility (ARIA labels, focus states, screen reader support)
+    - Toast notifications instead of alerts
+    - Responsive design with mobile breakpoints
+    - CSS custom properties design system
+    - Improved color contrast (WCAG AA compliant)
+    """
+    # Get shared design system
+    base_styles = get_base_styles()
+    toast_script = get_toast_script()
+
+    # Build HTML with string concatenation for cleaner structure
+    html_start = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Fleet Dashboard - Monitor and manage your Mac fleet">
+    <meta name="theme-color" content="#0a0a0a">
+    <title>Fleet Dashboard - Atlas</title>
+    <style>
+'''
+    # Dashboard-specific styles that build on the base design system
+    dashboard_styles = '''
+        /* ========================================
+           Fleet Dashboard Specific Styles
+           ======================================== */
+        body {
+            padding: 20px;
+        }
+
+        /* Header */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            padding-right: 80px;
+            border-bottom: 2px solid var(--color-primary, #00ff00);
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .dashboard-header h1 {
+            color: var(--color-primary, #00ff00);
+            font-size: 32px;
+            margin: 0;
+        }
+
+        /* Summary Cards */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+            border: 2px solid var(--color-primary, #00ff00);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .summary-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: var(--color-primary, #00ff00);
+            margin: 10px 0;
+        }
+
+        .summary-label {
+            color: var(--text-secondary, #b3b3b3);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Machine Grid */
+        .machines-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .machine-card {
+            background: #1a1a1a;
+            border: 2px solid #333;
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s;
+            cursor: pointer;
+            text-decoration: none;
+            display: block;
+            color: inherit;
+        }
+
+        .machine-card:hover {
+            border-color: var(--color-primary, #00ff00);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 255, 0, 0.3);
+        }
+
+        .machine-card:focus-visible {
+            outline: 2px solid var(--color-primary, #00ff00);
+            outline-offset: 2px;
+        }
+
+        .machine-card.online {
+            border-color: var(--color-primary, #00ff00);
+        }
+
+        .machine-card.warning {
+            border-color: var(--color-warning, #ffd93d);
+        }
+
+        .machine-card.offline {
+            border-color: var(--color-error, #ff4444);
+            opacity: 0.6;
+        }
+
+        .machine-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .machine-name {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .machine-status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-online {
+            background: var(--color-primary, #00ff00);
+            color: #0a0a0a;
+        }
+
+        .status-warning {
+            background: var(--color-warning, #ffd93d);
+            color: #0a0a0a;
+        }
+
+        .status-offline {
+            background: var(--color-error, #ff4444);
+            color: #fff;
+        }
+
+        .machine-info {
+            font-size: 12px;
+            color: var(--text-secondary, #b3b3b3);
+            margin-bottom: 15px;
+        }
+
+        /* Metrics */
+        .metrics {
+            display: grid;
+            gap: 10px;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .metric-label {
+            color: var(--text-secondary, #b3b3b3);
+            font-size: 14px;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .metric-bar {
+            width: 100%;
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .metric-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+            border-radius: 4px;
+        }
+
+        .metric-fill.cpu {
+            background: linear-gradient(90deg, var(--color-primary, #00ff00), #00cc00);
+        }
+
+        .metric-fill.memory {
+            background: linear-gradient(90deg, #00ffff, #0099ff);
+        }
+
+        .metric-fill.disk {
+            background: linear-gradient(90deg, #ff00ff, #cc00cc);
+        }
+
+        .metric-fill.high {
+            background: linear-gradient(90deg, var(--color-error, #ff4444), #cc0000) !important;
+        }
+
+        /* Alerts */
+        .alerts-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #1a1a1a;
+            border: 2px solid var(--color-error, #ff4444);
+            border-radius: 15px;
+        }
+
+        .alerts-section h2 {
+            color: var(--color-error, #ff4444);
+            margin-bottom: 15px;
+        }
+
+        .alert-item {
+            padding: 10px;
+            background: #2a2a2a;
+            border-left: 4px solid var(--color-error, #ff4444);
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+
+        .alert-machine {
+            font-weight: bold;
+            color: var(--color-primary, #00ff00);
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-muted, #888888);
+            font-size: 18px;
+        }
+
+        .refresh-indicator {
+            color: var(--color-primary, #00ff00);
+            font-size: 14px;
+        }
+
+        /* Speed Test Widget */
+        .speedtest-widget {
+            background: #1a1a1a;
+            border: 2px solid var(--color-primary, #00ff00);
+            border-radius: 15px;
+            padding: 25px;
+        }
+
+        .speedtest-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+
+        .speedtest-card {
+            background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+            border: 2px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .speedtest-card:hover {
+            border-color: var(--color-primary, #00ff00);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 255, 0, 0.2);
+        }
+
+        .speedtest-machine-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--color-primary, #00ff00);
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .speedtest-test-count {
+            font-size: 12px;
+            color: var(--text-secondary, #b3b3b3);
+            background: #333;
+            padding: 4px 8px;
+            border-radius: 8px;
+        }
+
+        .speedtest-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .speedtest-metric:last-child {
+            border-bottom: none;
+        }
+
+        .speedtest-metric-label {
+            color: var(--text-secondary, #b3b3b3);
+            font-size: 14px;
+        }
+
+        .speedtest-metric-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .speedtest-metric-value.download {
+            color: var(--color-primary, #00ff00);
+        }
+
+        .speedtest-metric-value.upload {
+            color: #00ccff;
+        }
+
+        .speedtest-metric-value.ping {
+            color: var(--color-warning, #ffd93d);
+        }
+
+        .speedtest-subnet-header {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ccff;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #00ccff;
+        }
+
+        .speedtest-subnet-machines {
+            font-size: 12px;
+            color: var(--text-secondary, #b3b3b3);
+            margin-bottom: 15px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .refreshing {
+            animation: pulse 1s infinite;
+        }
+
+        /* Hamburger Menu */
+        .hamburger-menu {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+
+        .hamburger-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--color-primary, #00ff00);
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+            border: none;
+        }
+
+        .hamburger-icon:hover {
+            background: #00cc00;
+            transform: scale(1.1);
+        }
+
+        .hamburger-icon:focus-visible {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+
+        .hamburger-icon span {
+            width: 24px;
+            height: 3px;
+            background: #000;
+            border-radius: 2px;
+            transition: all 0.3s;
+            pointer-events: none;
+        }
+
+        .hamburger-icon.active span:nth-child(1) {
+            transform: rotate(45deg) translate(6px, 6px);
+        }
+
+        .hamburger-icon.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .hamburger-icon.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(6px, -6px);
+        }
+
+        /* Dropdown Menu */
+        .dropdown-menu {
+            position: absolute;
+            top: 50px;
+            right: 0;
+            background: #1a1a1a;
+            border: 2px solid var(--color-primary, #00ff00);
+            border-radius: 10px;
+            min-width: 250px;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0, 255, 0, 0.3);
+        }
+
+        .dropdown-menu.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 15px 20px;
+            color: #fff;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: none;
+            border-left: none;
+            border-right: none;
+            border-top: none;
+            width: 100%;
+            text-align: left;
+            font-size: inherit;
+            font-family: inherit;
+        }
+
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-item:hover {
+            background: #2a2a2a;
+            color: var(--color-primary, #00ff00);
+        }
+
+        .dropdown-item:focus-visible {
+            outline: 2px solid var(--color-primary, #00ff00);
+            outline-offset: -2px;
+        }
+
+        .dropdown-section {
+            padding: 10px 20px;
+            color: var(--color-primary, #00ff00);
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #333;
+        }
+
+        .user-info {
+            padding: 15px 20px;
+            background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+            border-bottom: 2px solid var(--color-primary, #00ff00);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: var(--color-primary, #00ff00);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #000;
+            font-size: 18px;
+        }
+
+        .user-details {
+            flex: 1;
+        }
+
+        .user-name {
+            color: #fff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .user-role {
+            color: var(--text-secondary, #b3b3b3);
+            font-size: 12px;
+        }
+
+        .sign-out-item {
+            background: var(--color-error, #ff4444) !important;
+            color: #fff !important;
+            font-weight: bold;
+        }
+
+        .sign-out-item:hover {
+            background: #cc0000 !important;
+            color: #fff !important;
+        }
+
+        /* Confirmation Dialog */
+        .confirm-dialog {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .confirm-dialog.active {
+            display: flex;
+        }
+
+        .confirm-content {
+            background: #1a1a1a;
+            border: 2px solid var(--color-primary, #00ff00);
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .confirm-title {
+            color: var(--color-primary, #00ff00);
+            font-size: 24px;
+            margin-bottom: 15px;
+        }
+
+        .confirm-message {
+            color: var(--text-secondary, #b3b3b3);
+            margin-bottom: 25px;
+        }
+
+        .confirm-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .confirm-btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid;
+        }
+
+        .confirm-btn.cancel {
+            background: #2a2a2a;
+            border-color: #333;
+            color: #fff;
+        }
+
+        .confirm-btn.cancel:hover {
+            background: #333;
+        }
+
+        .confirm-btn.danger {
+            background: var(--color-error, #ff4444);
+            border-color: var(--color-error, #ff4444);
+            color: #fff;
+        }
+
+        .confirm-btn.danger:hover {
+            background: #cc0000;
+        }
+
+        .confirm-btn:focus-visible {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 768px) {
+            .dashboard-header {
+                flex-direction: column;
+                align-items: flex-start;
+                padding-right: 60px;
+            }
+
+            .dashboard-header h1 {
+                font-size: 24px;
+            }
+
+            .summary {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .summary-value {
+                font-size: 32px;
+            }
+
+            .machines-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .speedtest-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hamburger-menu {
+                top: 15px;
+                right: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 12px;
+            }
+
+            .summary {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .summary-card {
+                padding: 15px;
+            }
+
+            .summary-value {
+                font-size: 28px;
+            }
+
+            .machine-card {
+                padding: 15px;
+            }
+
+            .speedtest-widget {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Confirmation Dialog -->
+    <div id="confirmDialog" class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <div class="confirm-content">
+            <h2 id="confirmTitle" class="confirm-title">Confirm Action</h2>
+            <p id="confirmMessage" class="confirm-message"></p>
+            <div class="confirm-actions">
+                <button id="confirmCancel" class="confirm-btn cancel">Cancel</button>
+                <button id="confirmOk" class="confirm-btn danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hamburger Menu -->
+    <nav class="hamburger-menu" aria-label="Main menu">
+        <button class="hamburger-icon" onclick="toggleMenu()" aria-expanded="false" aria-controls="dropdownMenu" aria-label="Open menu">
+            <span aria-hidden="true"></span>
+            <span aria-hidden="true"></span>
+            <span aria-hidden="true"></span>
+        </button>
+        <div class="dropdown-menu" id="dropdownMenu" role="menu" aria-hidden="true">
+            <div class="user-info" id="userInfo">
+                <div class="user-avatar" id="userAvatar" aria-hidden="true">?</div>
+                <div class="user-details">
+                    <div class="user-name" id="userName">Loading...</div>
+                    <div class="user-role" id="userRole">...</div>
+                </div>
+            </div>
+            <div class="dropdown-section" role="presentation">Export Logs</div>
+            <button class="dropdown-item" onclick="exportAllLogs()" role="menuitem">
+                <span aria-hidden="true"></span> Export All Logs
+            </button>
+            <button class="dropdown-item" onclick="exportLogsByType('wifi')" role="menuitem">
+                <span aria-hidden="true"></span> Export WiFi Logs
+            </button>
+            <button class="dropdown-item" onclick="exportLogsByType('speedtest')" role="menuitem">
+                <span aria-hidden="true"></span> Export Speedtest Logs
+            </button>
+            <button class="dropdown-item" onclick="exportLogsByType('ping')" role="menuitem">
+                <span aria-hidden="true">🏓</span> Export Ping Logs
+            </button>
+            <button class="dropdown-item" onclick="exportLogsByType('health')" role="menuitem">
+                <span aria-hidden="true">❤️</span> Export Health Logs
+            </button>
+            <button class="dropdown-item" onclick="exportLogsByType('processes')" role="menuitem">
+                <span aria-hidden="true"></span> Export Process Logs
+            </button>
+            <div class="dropdown-section" role="presentation">Analytics</div>
+            <button class="dropdown-item" onclick="navigateToNetworkAnalysis()" role="menuitem">
+                <span aria-hidden="true"></span> Network Analysis
+            </button>
+            <div class="dropdown-section" role="presentation">Configuration</div>
+            <button class="dropdown-item" onclick="navigateToSettings()" role="menuitem">
+                <span aria-hidden="true"></span> Settings
+            </button>
+            <button class="dropdown-item" onclick="navigateToStorageInfo()" role="menuitem">
+                <span aria-hidden="true"></span> Settings Info
+            </button>
+            <button class="dropdown-item sign-out-item" onclick="signOut()" role="menuitem">
+                <span aria-hidden="true">🚪</span> Sign Out
+            </button>
+        </div>
+    </nav>
+
+    <header class="dashboard-header">
+        <h1>Fleet Dashboard</h1>
+        <div class="refresh-indicator" id="refreshIndicator" role="status" aria-live="polite">
+            <span id="refreshText">Updating...</span>
+        </div>
+    </header>
+    
+    <main id="main-content" role="main">
+        <!-- Certificate Expiration Warning -->
+        <div id="certWarning" role="alert" aria-live="assertive" style="display: none; margin: 20px 0; padding: 15px; border-radius: 10px; border-left: 5px solid;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                <div>
+                    <strong id="certWarningTitle"></strong>
+                    <div id="certWarningMessage" style="margin-top: 5px;"></div>
+                </div>
+                <button onclick="window.location='/settings'" style="padding: 10px 20px; background: var(--color-primary, #00ff00); color: #000; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+                    Renew Certificate
+                </button>
+            </div>
+        </div>
+
+        <!-- Summary Section -->
+        <section class="summary" id="summary" aria-label="Fleet Summary">
+            <article class="summary-card">
+                <div class="summary-label">Total Machines</div>
+                <div class="summary-value" id="totalMachines" aria-live="polite">--</div>
+            </article>
+            <article class="summary-card">
+                <div class="summary-label">Online</div>
+                <div class="summary-value" style="color: var(--color-primary, #00ff00);" id="onlineMachines" aria-live="polite">--</div>
+            </article>
+            <article class="summary-card">
+                <div class="summary-label">Warning</div>
+                <div class="summary-value" style="color: var(--color-warning, #ffd93d);" id="warningMachines" aria-live="polite">--</div>
+            </article>
+            <article class="summary-card">
+                <div class="summary-label">Offline</div>
+                <div class="summary-value" style="color: var(--color-error, #ff4444);" id="offlineMachines" aria-live="polite">--</div>
+            </article>
+            <article class="summary-card">
+                <div class="summary-label">Avg CPU</div>
+                <div class="summary-value" id="avgCpu" aria-live="polite">--</div>
+            </article>
+            <article class="summary-card">
+                <div class="summary-label">Avg Memory</div>
+                <div class="summary-value" id="avgMemory" aria-live="polite">--</div>
+            </article>
+        </section>
+
+        <!-- Speed Test Aggregation Widget -->
+        <section class="speedtest-widget" id="speedtestWidget" aria-labelledby="speedtest-heading" style="margin-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                <h2 id="speedtest-heading" style="color: var(--color-primary, #00ff00); font-size: 24px;">Network Performance (Recent 20 Tests)</h2>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button onclick="refreshSpeedTestData()" style="padding: 8px 16px; background: var(--color-primary, #00ff00); color: #000; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;" aria-label="Refresh speed test data">
+                        Refresh
+                    </button>
+                    <button onclick="toggleSpeedTestView()" id="speedtestViewToggle" style="padding: 8px 16px; background: #333; color: #fff; border: 1px solid var(--color-primary, #00ff00); border-radius: 5px; cursor: pointer; font-weight: bold;" aria-pressed="false">
+                        Show Subnet View
+                    </button>
+                </div>
+            </div>
+
+            <!-- Fleet Average Summary -->
+            <div id="fleetAverageSummary" style="margin-bottom: 20px; display: none;" role="region" aria-label="Fleet average network performance">
+                <div style="background: linear-gradient(135deg, #1a1a1a, #2a2a2a); border: 2px solid var(--color-primary, #00ff00); border-radius: 12px; padding: 20px;">
+                    <div style="display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 20px;">
+                        <div style="text-align: center;">
+                            <div style="color: var(--text-secondary, #b3b3b3); font-size: 14px; margin-bottom: 5px;">FLEET AVERAGE</div>
+                            <div style="color: var(--color-primary, #00ff00); font-size: 24px; font-weight: bold;">Network Performance</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="color: var(--text-secondary, #b3b3b3); font-size: 12px;">DOWNLOAD</div>
+                            <div id="fleetAvgDownload" style="color: var(--color-primary, #00ff00); font-size: 32px; font-weight: bold;" aria-live="polite">--</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="color: var(--text-secondary, #b3b3b3); font-size: 12px;">UPLOAD</div>
+                            <div id="fleetAvgUpload" style="color: #00ccff; font-size: 32px; font-weight: bold;" aria-live="polite">--</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="color: var(--text-secondary, #b3b3b3); font-size: 12px;">PING</div>
+                            <div id="fleetAvgPing" style="color: var(--color-warning, #ffd93d); font-size: 32px; font-weight: bold;" aria-live="polite">--</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="color: var(--text-secondary, #b3b3b3); font-size: 12px;">MACHINES</div>
+                            <div id="fleetMachineCount" style="color: #fff; font-size: 32px; font-weight: bold;" aria-live="polite">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Machine View -->
+            <div id="speedtestMachineView" class="speedtest-view" role="region" aria-label="Speed test by machine">
+                <div class="speedtest-grid" id="speedtestGrid">
+                    <div class="no-data" role="status">Loading speed test data...</div>
+                </div>
+            </div>
+
+            <!-- Subnet View (hidden by default) -->
+            <div id="speedtestSubnetView" class="speedtest-view" style="display: none;" role="region" aria-label="Speed test by subnet">
+                <div class="speedtest-grid" id="speedtestSubnetGrid">
+                    <div class="no-data" role="status">Loading subnet data...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Alerts Section -->
+        <aside class="alerts-section" id="alertsSection" style="display: none;" role="alert" aria-live="polite">
+            <h2>Active Alerts</h2>
+            <div id="alertsList"></div>
+        </aside>
+
+        <!-- Machines Grid -->
+        <section class="machines-grid" id="machinesGrid" aria-label="Fleet machines" role="region">
+            <div class="no-data" role="status">Waiting for machines to report...</div>
+        </section>
+    </main>
+
+    <script>
+'''
+    # Inject toast script from shared design system
+    html_script = '''
+        // Confirmation dialog helper
+        function showConfirm(title, message) {
+            return new Promise((resolve) => {
+                const dialog = document.getElementById('confirmDialog');
+                const titleEl = document.getElementById('confirmTitle');
+                const messageEl = document.getElementById('confirmMessage');
+                const cancelBtn = document.getElementById('confirmCancel');
+                const okBtn = document.getElementById('confirmOk');
+
+                titleEl.textContent = title;
+                messageEl.textContent = message;
+                dialog.classList.add('active');
+
+                // Focus trap
+                okBtn.focus();
+
+                const cleanup = () => {
+                    dialog.classList.remove('active');
+                    cancelBtn.removeEventListener('click', onCancel);
+                    okBtn.removeEventListener('click', onOk);
+                };
+
+                const onCancel = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                const onOk = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                cancelBtn.addEventListener('click', onCancel);
+                okBtn.addEventListener('click', onOk);
+
+                // Close on escape
+                dialog.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        cleanup();
+                        resolve(false);
+                    }
+                });
+            });
+        }
+
+        async function updateDashboard() {
+            try {
+                document.getElementById('refreshIndicator').classList.add('refreshing');
+                
+                // Check certificate expiration
+                try {
+                    const certResponse = await fetch('/api/fleet/cert-status', { credentials: 'include' });
+                    const certStatus = await certResponse.json();
+                    
+                    if (certStatus.warning) {
+                        const warning = certStatus.warning;
+                        const warningDiv = document.getElementById('certWarning');
+                        const titleEl = document.getElementById('certWarningTitle');
+                        const messageEl = document.getElementById('certWarningMessage');
+                        
+                        // Set warning level colors
+                        if (warning.level === 'critical') {
+                            warningDiv.style.background = 'rgba(255, 68, 68, 0.1)';
+                            warningDiv.style.borderLeftColor = '#ff4444';
+                            titleEl.innerHTML = '🚨 ' + warning.message;
+                        } else if (warning.level === 'warning') {
+                            warningDiv.style.background = 'rgba(255, 217, 61, 0.1)';
+                            warningDiv.style.borderLeftColor = '#ffd93d';
+                            titleEl.innerHTML = '' + warning.message;
+                        } else {
+                            warningDiv.style.background = 'rgba(0, 255, 255, 0.1)';
+                            warningDiv.style.borderLeftColor = '#00ffff';
+                            titleEl.innerHTML = 'ℹ️ ' + warning.message;
+                        }
+                        
+                        messageEl.textContent = warning.action;
+                        warningDiv.style.display = 'block';
+                    } else {
+                        document.getElementById('certWarning').style.display = 'none';
+                    }
+                } catch (e) {
+                    // Certificate check failed, hide warning
+                    document.getElementById('certWarning').style.display = 'none';
+                }
+                
+                // Get summary
+                const summaryResponse = await fetch('/api/fleet/summary', { credentials: 'include' });
+                const summary = await summaryResponse.json();
+                
+                // Update summary cards
+                document.getElementById('totalMachines').textContent = summary.total_machines;
+                document.getElementById('onlineMachines').textContent = summary.online;
+                document.getElementById('warningMachines').textContent = summary.warning;
+                document.getElementById('offlineMachines').textContent = summary.offline;
+                document.getElementById('avgCpu').textContent = summary.avg_cpu.toFixed(1) + '%';
+                document.getElementById('avgMemory').textContent = summary.avg_memory.toFixed(1) + '%';
+                
+                // Update alerts
+                if (summary.alerts && summary.alerts.length > 0) {
+                    document.getElementById('alertsSection').style.display = 'block';
+                    document.getElementById('alertsList').innerHTML = summary.alerts.map(alert => `
+                        <div class="alert-item">
+                            <span class="alert-machine">${alert.machine_id}</span>: ${alert.message}
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('alertsSection').style.display = 'none';
+                }
+                
+                // Get machines
+                const machinesResponse = await fetch('/api/fleet/machines', { credentials: 'include' });
+                const data = await machinesResponse.json();
+                
+                // Render machines
+                const grid = document.getElementById('machinesGrid');
+                if (data.machines && data.machines.length > 0) {
+                    grid.innerHTML = data.machines.map(machine => {
+                        const metrics = machine.latest_metrics || {};
+                        const cpu = metrics.cpu?.percent || 0;
+                        const memory = metrics.memory?.percent || 0;
+                        // Calculate disk used percentage: (total - free) / total * 100
+                        const diskMetrics = metrics.disk || {};
+                        let disk = 0;
+                        if (diskMetrics.total && diskMetrics.free !== undefined) {
+                            const actualUsed = diskMetrics.total - diskMetrics.free;
+                            disk = (actualUsed / diskMetrics.total) * 100;
+                        } else if (diskMetrics.total && diskMetrics.used) {
+                            disk = (diskMetrics.used / diskMetrics.total) * 100;
+                        } else {
+                            disk = diskMetrics.percent || 0;
+                        }
+                        
+                        const machineUrl = machine.info?.serial_number || machine.machine_id;
+                        // Use Fleet Server proxy route - serial number is static even if IP changes
+                        const agentDashboardUrl = '/machine/' + machineUrl + '/dashboard';
+                        return `
+                            <div class="machine-card ${machine.status}" onclick="window.open('${agentDashboardUrl}', '_blank')" title="Open Agent Dashboard (S/N: ${machineUrl})">
+                                <div class="machine-header">
+                                    <div class="machine-name">${machine.info?.computer_name || machine.info?.hostname || machine.machine_id}</div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        ${machine.info?.e2ee_enabled ? '<span title="E2EE Encrypted" style="color: #00ff00; font-size: 14px;"></span>' : '<span title="Not Encrypted" style="color: #666; font-size: 14px;">🔓</span>'}
+                                        <div class="machine-status status-${machine.status}">${machine.status}</div>
+                                    </div>
+                                </div>
+                                <div class="machine-info">
+                                    ${machine.info?.e2ee_enabled ? '<span style="color: #00ff00; font-size: 11px;">E2EE Active</span> • ' : ''}
+                                    ${machine.info?.serial_number ? 'S/N: ' + machine.info.serial_number + '<br>' : ''}
+                                    ${machine.info?.local_ip ? '<span style="color: #00C8FF;">Agent: ' + machine.info.local_ip + ':8767</span><br>' : ''}
+                                    ${machine.info?.os || 'Unknown'} ${machine.info?.os_version || ''}<br>
+                                    ${machine.info?.cpu_threads || '?'} cores • ${formatBytes(machine.info?.total_memory || 0)} RAM
+                                </div>
+                                <div class="metrics">
+                                    <div class="metric">
+                                        <span class="metric-label">CPU</span>
+                                        <span class="metric-value">${cpu.toFixed(1)}%</span>
+                                    </div>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill cpu ${cpu > 90 ? 'high' : ''}" style="width: ${cpu}%"></div>
+                                    </div>
+                                    
+                                    <div class="metric">
+                                        <span class="metric-label">Memory</span>
+                                        <span class="metric-value">${memory.toFixed(1)}%</span>
+                                    </div>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill memory ${memory > 90 ? 'high' : ''}" style="width: ${memory}%"></div>
+                                    </div>
+                                    
+                                    <div class="metric">
+                                        <span class="metric-label">Disk Space Remaining</span>
+                                        <span class="metric-value">${formatBytes(diskMetrics.free || 0)} / ${formatBytes(diskMetrics.total || 0)}</span>
+                                    </div>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill disk ${disk > 90 ? 'high' : ''}" style="width: ${disk}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    grid.innerHTML = '<div class="no-data">No machines reporting yet</div>';
+                }
+                
+                document.getElementById('refreshText').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+                
+            } catch (e) {
+                console.error('Update failed:', e);
+                document.getElementById('refreshText').textContent = 'Update failed';
+            } finally {
+                document.getElementById('refreshIndicator').classList.remove('refreshing');
+            }
+        }
+        
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        // Speed Test Widget Functions
+        let speedtestViewMode = 'machine'; // 'machine' or 'subnet'
+        
+        async function loadSpeedTestData() {
+            try {
+                if (speedtestViewMode === 'machine') {
+                    await loadMachineSpeedTests();
+                } else {
+                    await loadSubnetSpeedTests();
+                }
+            } catch (e) {
+                console.error('Error loading speed test data:', e);
+            }
+        }
+        
+        async function loadMachineSpeedTests() {
+            try {
+                const response = await fetch('/api/fleet/speedtest/recent20', { credentials: 'include' });
+                const data = await response.json();
+                
+                const grid = document.getElementById('speedtestGrid');
+                
+                if (Object.keys(data).length === 0) {
+                    grid.innerHTML = '<div class="no-data">No speed test data available yet</div>';
+                    document.getElementById('fleetAverageSummary').style.display = 'none';
+                    return;
+                }
+                
+                // Calculate fleet average
+                let totalDownload = 0;
+                let totalUpload = 0;
+                let totalPing = 0;
+                let machineCount = 0;
+                
+                for (const [machineId, stats] of Object.entries(data)) {
+                    totalDownload += stats.avg_download_mbps;
+                    totalUpload += stats.avg_upload_mbps;
+                    totalPing += stats.avg_ping_ms;
+                    machineCount++;
+                }
+                
+                const fleetAvgDownload = (totalDownload / machineCount).toFixed(1);
+                const fleetAvgUpload = (totalUpload / machineCount).toFixed(1);
+                const fleetAvgPing = (totalPing / machineCount).toFixed(1);
+                
+                // Update fleet average display
+                document.getElementById('fleetAvgDownload').textContent = fleetAvgDownload + ' Mbps';
+                document.getElementById('fleetAvgUpload').textContent = fleetAvgUpload + ' Mbps';
+                document.getElementById('fleetAvgPing').textContent = fleetAvgPing + ' ms';
+                document.getElementById('fleetMachineCount').textContent = machineCount;
+                document.getElementById('fleetAverageSummary').style.display = 'block';
+                
+                let html = '';
+                for (const [machineId, stats] of Object.entries(data)) {
+                    html += `
+                        <div class="speedtest-card">
+                            <div class="speedtest-machine-name">
+                                <span> ${machineId}</span>
+                                <span class="speedtest-test-count">${stats.test_count} tests</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">⬇️ Download</span>
+                                <span class="speedtest-metric-value download">${stats.avg_download_mbps.toFixed(1)} Mbps</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">⬆️ Upload</span>
+                                <span class="speedtest-metric-value upload">${stats.avg_upload_mbps.toFixed(1)} Mbps</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">🏓 Ping</span>
+                                <span class="speedtest-metric-value ping">${stats.avg_ping_ms.toFixed(1)} ms</span>
+                            </div>
+                            ${stats.avg_jitter_ms ? `
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label"> Jitter</span>
+                                <span class="speedtest-metric-value">${stats.avg_jitter_ms.toFixed(1)} ms</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                
+                grid.innerHTML = html;
+            } catch (e) {
+                console.error('Error loading machine speed tests:', e);
+                document.getElementById('speedtestGrid').innerHTML = 
+                    '<div class="no-data">Error loading speed test data</div>';
+                document.getElementById('fleetAverageSummary').style.display = 'none';
+            }
+        }
+        
+        async function loadSubnetSpeedTests() {
+            try {
+                const response = await fetch('/api/fleet/speedtest/subnet', { credentials: 'include' });
+                const data = await response.json();
+                
+                const grid = document.getElementById('speedtestSubnetGrid');
+                
+                if (!data.subnets || Object.keys(data.subnets).length === 0) {
+                    grid.innerHTML = '<div class="no-data">No subnet data available yet</div>';
+                    return;
+                }
+                
+                let html = '';
+                for (const [subnet, stats] of Object.entries(data.subnets)) {
+                    const machineList = stats.machines.join(', ');
+                    html += `
+                        <div class="speedtest-card">
+                            <div class="speedtest-subnet-header">
+                                ${subnet}
+                            </div>
+                            <div class="speedtest-subnet-machines">
+                                ${stats.machine_count} machine(s): ${machineList}
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">⬇️ Download</span>
+                                <span class="speedtest-metric-value download">${stats.avg_download_mbps.toFixed(1)} Mbps</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">⬆️ Upload</span>
+                                <span class="speedtest-metric-value upload">${stats.avg_upload_mbps.toFixed(1)} Mbps</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label">🏓 Ping</span>
+                                <span class="speedtest-metric-value ping">${stats.avg_ping_ms.toFixed(1)} ms</span>
+                            </div>
+                            <div class="speedtest-metric">
+                                <span class="speedtest-metric-label"> Tests</span>
+                                <span class="speedtest-metric-value">${stats.test_count}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                grid.innerHTML = html;
+            } catch (e) {
+                console.error('Error loading subnet speed tests:', e);
+                document.getElementById('speedtestSubnetGrid').innerHTML = 
+                    '<div class="no-data">Error loading subnet data</div>';
+            }
+        }
+        
+        function toggleSpeedTestView() {
+            const machineView = document.getElementById('speedtestMachineView');
+            const subnetView = document.getElementById('speedtestSubnetView');
+            const toggleBtn = document.getElementById('speedtestViewToggle');
+            
+            if (speedtestViewMode === 'machine') {
+                speedtestViewMode = 'subnet';
+                machineView.style.display = 'none';
+                subnetView.style.display = 'block';
+                toggleBtn.textContent = ' Show Machine View';
+                loadSubnetSpeedTests();
+            } else {
+                speedtestViewMode = 'machine';
+                machineView.style.display = 'block';
+                subnetView.style.display = 'none';
+                toggleBtn.textContent = ' Show Subnet View';
+                loadMachineSpeedTests();
+            }
+        }
+        
+        function refreshSpeedTestData() {
+            loadSpeedTestData();
+        }
+        
+        // Hamburger menu toggle
+        function toggleMenu() {
+            const menu = document.getElementById('dropdownMenu');
+            const icon = document.querySelector('.hamburger-icon');
+            const isOpen = menu.classList.toggle('show');
+            icon.classList.toggle('active');
+
+            // Update ARIA attributes for accessibility
+            icon.setAttribute('aria-expanded', isOpen);
+            menu.setAttribute('aria-hidden', !isOpen);
+            icon.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
+
+            // Focus first menu item when opening
+            if (isOpen) {
+                const firstItem = menu.querySelector('.dropdown-item');
+                if (firstItem) firstItem.focus();
+            }
+        }
+        
+        // Navigate to settings page
+        function navigateToSettings() {
+            window.location.href = '/settings';
+        }
+        
+        // Navigate to network analysis page
+        function navigateToNetworkAnalysis() {
+            window.location.href = '/network-analysis';
+        }
+        
+        // Navigate to storage info page
+        function navigateToStorageInfo() {
+            window.location.href = '/api/fleet/storage-info';
+        }
+        
+        // Load current user info
+        async function loadUserInfo() {
+            try {
+                const response = await fetch('/api/fleet/current-user', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                if (data.username) {
+                    document.getElementById('userName').textContent = data.username;
+                    document.getElementById('userRole').textContent = data.role.toUpperCase();
+                    // Set avatar to first letter of username
+                    document.getElementById('userAvatar').textContent = data.username.charAt(0).toUpperCase();
+                } else {
+                    document.getElementById('userName').textContent = 'Guest';
+                    document.getElementById('userRole').textContent = 'VIEWER';
+                    document.getElementById('userAvatar').textContent = 'G';
+                }
+            } catch (e) {
+                console.error('Error loading user info:', e);
+                document.getElementById('userName').textContent = 'Unknown';
+                document.getElementById('userRole').textContent = 'USER';
+                document.getElementById('userAvatar').textContent = '?';
+            }
+        }
+        
+        // Sign out function
+        async function signOut() {
+            const confirmed = await showConfirm('Sign Out', 'Are you sure you want to sign out?');
+            if (confirmed) {
+                // Clear credentials by making a request with invalid credentials
+                fetch('/api/fleet/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                }).finally(() => {
+                    // Redirect to login (browser will prompt for credentials)
+                    window.location.href = '/dashboard?logout=1';
+                    // Force browser to forget credentials
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 100);
+                });
+            }
+        }
+        
+        // Load user info on page load
+        loadUserInfo();
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menu = document.querySelector('.hamburger-menu');
+            if (!menu.contains(event.target)) {
+                document.getElementById('dropdownMenu').classList.remove('show');
+                document.querySelector('.hamburger-icon').classList.remove('active');
+            }
+        });
+        
+        // Export all logs
+        async function exportAllLogs() {
+            try {
+                ToastManager.info('Exporting logs...');
+                const response = await fetch('/api/fleet/widget-logs?limit=10000', { credentials: 'include' });
+                const data = await response.json();
+                await enrichLogsWithSerialNumbers(data.logs);
+                downloadCSV(data.logs, 'fleet_all_logs.csv');
+                ToastManager.success(`Exported ${data.logs.length} log entries`);
+            } catch (e) {
+                ToastManager.error('Error exporting logs: ' + e.message);
+            }
+        }
+
+        // Export logs by type
+        async function exportLogsByType(widgetType) {
+            try {
+                ToastManager.info(`Exporting ${widgetType} logs...`);
+                const response = await fetch(`/api/fleet/widget-logs?widget_type=${widgetType}&limit=10000`);
+                const data = await response.json();
+                await enrichLogsWithSerialNumbers(data.logs);
+                downloadCSV(data.logs, `fleet_${widgetType}_logs.csv`);
+                ToastManager.success(`Exported ${data.logs.length} ${widgetType} log entries`);
+            } catch (e) {
+                ToastManager.error('Error exporting logs: ' + e.message);
+            }
+        }
+        
+        // Enrich logs with serial numbers
+        async function enrichLogsWithSerialNumbers(logs) {
+            // Get all machines
+            const machinesResponse = await fetch('/api/fleet/machines', { credentials: 'include' });
+            const machinesData = await machinesResponse.json();
+            
+            // Create map of machine_id to serial_number
+            const serialMap = {};
+            machinesData.machines.forEach(machine => {
+                serialMap[machine.machine_id] = machine.info?.serial_number || machine.machine_id;
+            });
+            
+            // Replace machine_id with serial_number in logs
+            logs.forEach(log => {
+                log.machine_id = serialMap[log.machine_id] || log.machine_id;
+            });
+        }
+        
+        // Convert logs to CSV format
+        function logsToCSV(logs) {
+            if (logs.length === 0) {
+                return 'No logs to export';
+            }
+            
+            // CSV headers
+            const headers = ['ID', 'Serial Number', 'Timestamp', 'Level', 'Widget Type', 'Message', 'Data'];
+            
+            // Convert logs to CSV rows
+            const rows = logs.map(log => {
+                // Flatten data object to JSON string for CSV
+                const dataStr = JSON.stringify(log.data || {}).replace(/"/g, '""');
+                
+                return [
+                    log.id,
+                    log.machine_id,
+                    log.timestamp,
+                    log.level,
+                    log.widget_type,
+                    `"${log.message.replace(/"/g, '""')}"`,  // Escape quotes in message
+                    `"${dataStr}"`  // Escape quotes in data
+                ].join(',');
+            });
+            
+            // Combine headers and rows
+            return [headers.join(','), ...rows].join('\\n');
+        }
+        
+        // Download CSV file
+        function downloadCSV(data, filename) {
+            const csv = logsToCSV(data);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Download agent installer
+        async function downloadAgentInstaller() {
+            try {
+                const response = await fetch('/api/fleet/download-installer', { credentials: 'include' });
+                if (!response.ok) {
+                    throw new Error('Failed to generate installer');
+                }
+                
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'ATLAS_Fleet_Installer.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                ToastManager.success('ATLAS Fleet Installer downloaded! Extract and run: sudo ./install_split_mode.sh');
+            } catch (e) {
+                ToastManager.error('Error downloading installer: ' + e.message);
+            }
+        }
+        
+        // Update every 5 seconds
+        updateDashboard();
+        setInterval(updateDashboard, 5000);
+
+        // Load speed test data on page load and refresh every 30 seconds
+        loadSpeedTestData();
+        setInterval(loadSpeedTestData, 30000);
+    </script>
+</body>
+</html>'''
+
+    # Return concatenated HTML with injected shared components
+    return html_start + base_styles + dashboard_styles + toast_script + html_script
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Threaded HTTP server"""
+    daemon_threads = True
+
+
+def start_fleet_server(port: int = 8778, api_key: Optional[str] = None, data_store: Optional[Any] = None, host: str = '0.0.0.0',
+                       web_username: Optional[str] = None, web_password: Optional[str] = None,
+                       ssl_cert: Optional[str] = None, ssl_key: Optional[str] = None,
+                       encryption_key: Optional[str] = None, cluster_config: Optional[Dict[str, Any]] = None,
+                       dev_mode: bool = False):
+    """
+    Start the fleet monitoring server
+    
+    Args:
+        port: Port to listen on
+        api_key: Optional API key for agent authentication
+        data_store: Optional data store instance. If not provided, an in-memory
+            FleetDataStore will be used.
+        host: Host to bind to (default: 0.0.0.0 for all interfaces)
+        web_username: Optional username for web UI authentication
+        web_password: Optional password for web UI authentication (will be hashed)
+        ssl_cert: Optional path to SSL certificate file for HTTPS
+        ssl_key: Optional path to SSL private key file for HTTPS
+        encryption_key: Optional encryption key for end-to-end payload encryption (base64)
+        cluster_config: Optional cluster configuration for high availability mode
+    """
+    # Create data store (default in-memory) if one is not provided
+    if data_store is None:
+        data_store = FleetDataStore()
+    
+    # Initialize end-to-end encryption if key provided
+    if encryption_key:
+        if not E2EE_AVAILABLE or not DataEncryption:
+            logger.error("End-to-end encryption requested but encryption module not available!")
+            logger.error("Install with: pip install cryptography")
+        else:
+            FleetServerHandler.encryption = DataEncryption(encryption_key)
+            logger.info("End-to-end payload encryption ENABLED (AES-256-GCM)")
+    else:
+        FleetServerHandler.encryption = None
+        logger.warning("End-to-end payload encryption DISABLED - agents can send unencrypted data")
+    
+    # Initialize cluster manager if cluster config provided
+    cluster_manager = None
+    if cluster_config and cluster_config.get('enabled'):
+        try:
+            from atlas.cluster_manager import ClusterManager
+            # Add port and hostname to config if not set
+            if 'port' not in cluster_config:
+                cluster_config['port'] = port
+            if 'hostname' not in cluster_config:
+                import socket
+                cluster_config['hostname'] = socket.gethostname()
+            
+            cluster_manager = ClusterManager(cluster_config=cluster_config)
+            cluster_manager.start()
+            FleetServerHandler.cluster_manager = cluster_manager
+            logger.info(f"Cluster mode ENABLED (node: {cluster_manager.node_id}, backend: {cluster_config.get('backend', 'file')})")
+        except Exception as e:
+            logger.error(f"Failed to initialize cluster manager: {e}")
+            logger.info("Continuing in standalone mode")
+            FleetServerHandler.cluster_manager = None
+    else:
+        FleetServerHandler.cluster_manager = None
+        logger.info("Cluster mode DISABLED (standalone mode)")
+
+    # Initialize FleetAuthManager (Phase 4)
+    auth_manager = FleetAuthManager()
+    FleetServerHandler.auth_manager = auth_manager
+
+    # Initialize FleetRouter and register all route modules (Phase 4 Stage 5)
+    logger.info("Initializing FleetRouter and registering route modules...")
+    from atlas.fleet.server.router import FleetRouter
+    from atlas.fleet.server.routes.agent_routes import register_agent_routes
+    from atlas.fleet.server.routes.dashboard_routes import register_dashboard_routes
+    from atlas.fleet.server.routes.machine_routes import register_machine_routes
+    from atlas.fleet.server.routes.cluster_routes import register_cluster_routes
+    from atlas.fleet.server.routes.analysis_routes import register_analysis_routes
+    from atlas.fleet.server.routes.admin_routes import register_admin_routes
+    from atlas.fleet.server.routes.ui_routes import register_ui_routes
+    from atlas.fleet.server.routes.e2ee_routes import register_e2ee_routes
+    from atlas.fleet.server.routes.package_routes import register_package_routes
+    from atlas.fleet.server.routes.security_routes import register_security_routes
+    from atlas.fleet.server.routes.auth_routes import AuthRoutes, register_auth_routes
+
+    # Import new auth components (RESTful API Authentication)
+    from atlas.fleet.server.auth import (
+        get_jwt_manager,
+        get_api_key_manager,
+        get_oauth2_manager,
+        get_scope_validator,
+        get_auth_middleware,
+    )
+    from atlas.fleet_user_manager import FleetUserManager
+
+    router = FleetRouter()
+
+    # Register all route modules
+    register_agent_routes(router, data_store, FleetServerHandler.encryption, auth_manager)
+    register_dashboard_routes(router, data_store, auth_manager)
+    register_machine_routes(router, data_store, auth_manager)
+    register_cluster_routes(router, cluster_manager, auth_manager)
+    register_analysis_routes(router, data_store, auth_manager)
+    register_admin_routes(router, auth_manager, FleetServerHandler.encryption)
+    register_ui_routes(router, auth_manager, data_store)
+    register_e2ee_routes(router, data_store, auth_manager, FleetServerHandler.encryption)
+    register_package_routes(router, data_store, auth_manager, cluster_manager)
+    register_security_routes(router)  # Phase 3: Security monitoring endpoints
+
+    # Initialize RESTful API Authentication components
+    db_path = str(Path.home() / '.fleet-data' / 'users.db')
+    user_manager = FleetUserManager(db_path)
+    jwt_manager = get_jwt_manager(db_path)
+    api_key_manager = get_api_key_manager(db_path)
+    oauth2_manager = get_oauth2_manager(db_path, jwt_manager)
+    scope_validator = get_scope_validator(db_path)
+
+    # Log auth component status
+    if jwt_manager:
+        logger.info("JWT authentication enabled (PyJWT installed)")
+    else:
+        logger.warning("JWT authentication disabled - install PyJWT: pip install PyJWT")
+
+    # Create and register auth routes
+    auth_routes = AuthRoutes(
+        jwt_manager=jwt_manager,
+        api_key_manager=api_key_manager,
+        oauth2_manager=oauth2_manager,
+        user_manager=user_manager,
+        scope_validator=scope_validator,
+        db_path=db_path
+    )
+    register_auth_routes(router, auth_routes)
+    logger.info("RESTful API authentication endpoints registered")
+
+    # Create and add auth middleware to router
+    from atlas.fleet.server.auth import create_auth_middleware
+    auth_middleware = create_auth_middleware(
+        jwt_manager=jwt_manager,
+        api_key_manager=api_key_manager,
+        user_manager=user_manager,
+        db_path=db_path
+    )
+    router.add_global_middleware(auth_middleware)
+    logger.info("Auth middleware enabled (JWT, API Key, Session validation)")
+
+    # Count registered routes
+    route_count = len(router.list_routes())
+    logger.info(f"FleetRouter initialized with {route_count} routes across 11 modules")
+
+    FleetServerHandler.router = router
+
+    # Configure handler
+    FleetServerHandler.data_store = data_store
+    FleetServerHandler.api_key = api_key
+    FleetServerHandler.web_username = web_username
+    # Hash the password if provided (using bcrypt for security)
+    if web_password:
+        try:
+            import bcrypt
+            FleetServerHandler.web_password = bcrypt.hashpw(
+                web_password.encode('utf-8'),
+                bcrypt.gensalt(rounds=12)
+            ).decode('utf-8')
+        except ImportError:
+            # Fallback to SHA-256 if bcrypt not available
+            logger.warning("bcrypt not available - using SHA-256 for password hash (install bcrypt for better security)")
+            FleetServerHandler.web_password = hashlib.sha256(web_password.encode()).hexdigest()
+    else:
+        FleetServerHandler.web_password = None
+    
+    # Create and start server
+    server = ThreadedHTTPServer((host, port), FleetServerHandler)
+    
+    # Wrap with SSL if certificates provided
+    use_ssl = ssl_cert and ssl_key
+    if use_ssl:
+        import ssl
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(ssl_cert, ssl_key)
+
+        # SECURITY: SSL/TLS configuration for server
+        # Note: For server-side sockets, we don't use check_hostname/CERT_REQUIRED
+        # Those are for client-side verification. The server presents its cert to clients.
+
+        if not dev_mode:
+            # Production mode: Use strong TLS settings
+            logger.info("SSL enabled with TLS 1.2+ (production mode)")
+        else:
+            # Development mode marker
+            logger.warning(" Running in DEVELOPMENT MODE")
+            logger.warning(" Ensure you use proper certificates in production!")
+
+        # Set minimum TLS version for security (both dev and prod)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
+
+        # Server-side socket wrapping (presents certificate to clients)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+
+    # Initialize security headers and rate limiter (Phase 4 Security)
+    FleetServerHandler.use_ssl = use_ssl
+    FleetServerHandler.security_headers = SecurityHeaders(
+        use_ssl=use_ssl,
+        allowed_origins=[]  # No CORS for security - same-origin only
+    )
+    FleetServerHandler.rate_limiter = RateLimiter(
+        max_requests=100,  # 100 requests per minute per IP
+        window_seconds=60
+    )
+    logger.info("Security headers enabled (X-Frame-Options, CSP, HSTS, etc.)")
+    logger.info("Rate limiting enabled (100 requests/minute per IP)")
+
+    protocol = "https" if use_ssl else "http"
+    logger.info(f"Fleet server started on {host}:{port} ({protocol.upper()})")
+    if use_ssl:
+        logger.info(f"SSL/TLS enabled with certificate: {ssl_cert}")
+    if api_key:
+        logger.info("API key authentication enabled (for agents)")
+    if web_username:
+        logger.info(f"Web authentication enabled (username: {web_username})")
+    
+    # Show access URLs
+    logger.info(f"Local access: {protocol}://localhost:{port}/dashboard")
+    
+    # Try to get and display local IP addresses
+    try:
+        import socket
+        hostname = socket.gethostname()
+        local_ips = socket.gethostbyname_ex(hostname)[2]
+        local_ips = [ip for ip in local_ips if not ip.startswith("127.")]
+        if local_ips:
+            logger.info(f"Network access: http://{local_ips[0]}:{port}/dashboard")
+            if len(local_ips) > 1:
+                for ip in local_ips[1:]:
+                    logger.info(f"                http://{ip}:{port}/dashboard")
+    except Exception:
+        pass
+    
+    # Start automatic widget log cleanup thread (runs daily)
+    def cleanup_widget_logs():
+        """Background thread to cleanup old widget logs"""
+        import time
+        while True:
+            try:
+                # Sleep for 24 hours
+                time.sleep(86400)
+                
+                # Cleanup logs older than 7 days
+                if hasattr(data_store, 'cleanup_old_widget_logs'):
+                    deleted = data_store.cleanup_old_widget_logs(days=7)
+                    logger.info(f"Widget log cleanup: deleted {deleted} old log entries")
+            except Exception as e:
+                logger.error(f"Error in widget log cleanup: {e}")
+    
+    import threading
+    cleanup_thread = threading.Thread(target=cleanup_widget_logs, daemon=True)
+    cleanup_thread.start()
+    logger.info("Widget log cleanup scheduled (runs daily, retains 7 days)")
+
+    # Start auth token cleanup thread (runs hourly)
+    def cleanup_auth_tokens():
+        """Background thread to cleanup expired auth tokens"""
+        import time
+        while True:
+            try:
+                # Sleep for 1 hour
+                time.sleep(3600)
+
+                # Cleanup expired JWT refresh tokens
+                if jwt_manager:
+                    deleted_tokens = jwt_manager.cleanup_expired()
+                    if deleted_tokens > 0:
+                        logger.info(f"Auth cleanup: deleted {deleted_tokens} expired refresh tokens")
+
+                # Cleanup expired OAuth2 authorization codes
+                if oauth2_manager:
+                    deleted_codes = oauth2_manager.cleanup_expired()
+                    if deleted_codes > 0:
+                        logger.info(f"Auth cleanup: deleted {deleted_codes} expired OAuth2 codes")
+
+            except Exception as e:
+                logger.error(f"Error in auth token cleanup: {e}")
+
+    auth_cleanup_thread = threading.Thread(target=cleanup_auth_tokens, daemon=True)
+    auth_cleanup_thread.start()
+    logger.info("Auth token cleanup scheduled (runs hourly)")
+
+    # Start active agent health checker thread
+    def check_agent_health():
+        """Background thread to actively check agent health"""
+        import time
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        check_interval = 60  # Check every 60 seconds
+        
+        while True:
+            try:
+                time.sleep(check_interval)
+                
+                # Get all machines from data store
+                if hasattr(data_store, 'get_all_machines'):
+                    machines = data_store.get_all_machines()
+                    
+                    for machine in machines:
+                        machine_id = machine.get('machine_id')
+                        local_ip = machine.get('machine_info', {}).get('local_ip')
+                        
+                        if not local_ip or local_ip == 'localhost':
+                            continue
+                        
+                        # Try to ping agent health endpoint
+                        try:
+                            response = requests.get(
+                                f"http://{local_ip}:8767/api/agent/health",
+                                timeout=5,
+                                verify=False
+                            )
+                            
+                            if response.status_code == 200:
+                                health_data = response.json()
+                                
+                                # Update machine with health check data
+                                if hasattr(data_store, 'update_health_check'):
+                                    data_store.update_health_check(
+                                        machine_id,
+                                        status='reachable',
+                                        health_data=health_data,
+                                        latency_ms=int(response.elapsed.total_seconds() * 1000)
+                                    )
+                                    logger.debug(f"Health check OK: {machine_id} ({local_ip}) - {health_data.get('uptime_seconds')}s uptime")
+                            else:
+                                if hasattr(data_store, 'update_health_check'):
+                                    data_store.update_health_check(
+                                        machine_id,
+                                        status='unhealthy',
+                                        error=f"HTTP {response.status_code}"
+                                    )
+                                logger.debug(f"Health check failed: {machine_id} ({local_ip}) - HTTP {response.status_code}")
+                        
+                        except requests.exceptions.Timeout:
+                            if hasattr(data_store, 'update_health_check'):
+                                data_store.update_health_check(
+                                    machine_id,
+                                    status='timeout',
+                                    error='Connection timeout'
+                                )
+                            logger.debug(f"Health check timeout: {machine_id} ({local_ip})")
+                        
+                        except requests.exceptions.ConnectionError:
+                            if hasattr(data_store, 'update_health_check'):
+                                data_store.update_health_check(
+                                    machine_id,
+                                    status='unreachable',
+                                    error='Connection refused'
+                                )
+                            logger.debug(f"Health check unreachable: {machine_id} ({local_ip})")
+                        
+                        except Exception as e:
+                            if hasattr(data_store, 'update_health_check'):
+                                data_store.update_health_check(
+                                    machine_id,
+                                    status='error',
+                                    error=str(e)
+                                )
+                            logger.debug(f"Health check error: {machine_id} ({local_ip}) - {e}")
+                
+            except Exception as e:
+                logger.error(f"Error in agent health checker: {e}")
+    
+    health_check_thread = threading.Thread(target=check_agent_health, daemon=True)
+    health_check_thread.start()
+    logger.info("Agent health checker started (checks every 60 seconds)")
+
+    # Start network test servers for enterprise-grade testing (CyPerf-inspired)
+    # These allow agents to perform accurate throughput, UDP quality, and connection rate tests
+    # against the fleet server instead of public internet servers
+    network_test_servers = []
+    try:
+        from atlas.network.monitors import (
+            UDPEchoServer, ConnectionTestServer, ThroughputServer
+        )
+
+        # UDP Echo Server for jitter/loss testing (port 5005)
+        udp_server = UDPEchoServer(host='0.0.0.0', port=5005)
+        udp_server.start()
+        network_test_servers.append(udp_server)
+        logger.info("Network Test: UDP Echo Server started on port 5005 (VoIP/video quality testing)")
+
+        # TCP Connection Test Server for CPS testing (port 5006)
+        conn_server = ConnectionTestServer(host='0.0.0.0', port=5006)
+        conn_server.start()
+        network_test_servers.append(conn_server)
+        logger.info("Network Test: TCP Connection Server started on port 5006 (connection rate testing)")
+
+        # Throughput Test Server for bandwidth testing (port 5007)
+        throughput_server = ThroughputServer(host='0.0.0.0', tcp_port=5007)
+        throughput_server.start()
+        network_test_servers.append(throughput_server)
+        logger.info("Network Test: Throughput Server started on port 5007 (bandwidth testing)")
+
+        logger.info("Enterprise network testing infrastructure ready (CyPerf-inspired)")
+
+    except Exception as e:
+        logger.warning(f"Could not start network test servers: {e}")
+        logger.info("Network testing will use public servers instead")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("Shutting down fleet server...")
+
+        # Stop network test servers
+        for test_server in network_test_servers:
+            try:
+                test_server.stop()
+            except Exception:
+                pass
+        if network_test_servers:
+            logger.info("Network test servers stopped")
+
+        server.shutdown()
+
+
+def main():
+    """Run fleet server as standalone process"""
+    import argparse
+    from atlas.fleet_config import FleetConfig
+    
+    parser = argparse.ArgumentParser(description='Atlas Fleet Server')
+    parser.add_argument('--config', help='Path to configuration file')
+    parser.add_argument('--port', type=int, help='Server port')
+    parser.add_argument('--host', help='Host to bind to (default: 0.0.0.0 for all interfaces)')
+    parser.add_argument('--api-key', help='API key for agent authentication')
+    parser.add_argument('--web-username', help='Username for web UI authentication')
+    parser.add_argument('--web-password', help='Password for web UI authentication')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--inspect-storage', action='store_true', help='Show storage/backend info and exit')
+    
+    args = parser.parse_args()
+    
+    # Configure persistent logging with 7-day retention
+    log_dir = Path.home() / 'Library' / 'Logs' / 'FleetServer'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'fleet_server.log'
+    
+    from logging.handlers import TimedRotatingFileHandler
+    
+    # Create formatter
+    log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # File handler with 7-day retention (rotate daily, keep 7 backups)
+    file_handler = TimedRotatingFileHandler(
+        log_file,
+        when='midnight',
+        interval=1,
+        backupCount=7,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(log_formatter)
+    file_handler.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    console_handler.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    logger.info(f"Logging to file: {log_file} (7-day retention)")
+    
+    # Load configuration
+    config = FleetConfig(args.config) if args.config else FleetConfig()
+    
+    # Command line args override config file, env vars override all
+    # Priority: CLI args > Environment variables > Config file > Defaults
+    port = args.port or int(os.environ.get('FLEET_PORT', 0)) or config.get('server.port', 8778)
+    host = args.host or os.environ.get('FLEET_HOST') or config.get('server.host', '0.0.0.0')
+    api_key = args.api_key or os.environ.get('FLEET_API_KEY') or config.get('server.api_key')
+    web_username = args.web_username or os.environ.get('FLEET_WEB_USERNAME') or config.get('server.web_username')
+    web_password = args.web_password or os.environ.get('FLEET_WEB_PASSWORD') or config.get('server.web_password')
+    ssl_cert = os.environ.get('FLEET_SSL_CERT') or config.get('ssl.cert_file')
+    ssl_key = os.environ.get('FLEET_SSL_KEY') or config.get('ssl.key_file')
+    history_size = config.get('server.history_size', 1000)
+    db_path = config.get('server.db_path', str(Path.home() / '.fleet-data' / 'fleet_data.sqlite3'))
+    history_retention_days = config.get('server.history_retention_days', 30)
+    db_encryption_key = os.environ.get('FLEET_DB_KEY') or config.get('server.db_encryption_key')
+    encryption_key = os.environ.get('FLEET_ENCRYPTION_KEY') or config.get('server.encryption_key')
+
+    # If requested, inspect storage and exit
+    if args.inspect_storage:
+        data_store = PersistentFleetDataStore(
+            db_path=db_path,
+            history_size=history_size,
+            history_retention_days=history_retention_days,
+        )
+        info = {}
+        if hasattr(data_store, 'storage_info'):
+            try:
+                info = data_store.storage_info()
+            except Exception as e:
+                logger.error(f"Error inspecting storage: {e}", exc_info=True)
+                info = {'error': str(e)}
+        else:
+            info = {
+                'backend': 'unknown',
+                'note': 'Data store does not expose storage_info()'
+            }
+        print(json.dumps(info, indent=2))
+        return
+
+    # Create persistent data store (encrypted if key provided)
+    if db_encryption_key:
+        if not ENCRYPTION_AVAILABLE:
+            logger.error("Database encryption requested but cryptography package not installed!")
+            logger.error("Install with: pip install cryptography")
+            return
+        
+        logger.info("Using ENCRYPTED database storage")
+        data_store = EncryptedFleetDataStore(
+            db_path=db_path,
+            encryption_key=db_encryption_key,
+            history_size=history_size,
+            history_retention_days=history_retention_days,
+        )
+    else:
+        logger.info("Using UNENCRYPTED database storage")
+        data_store = PersistentFleetDataStore(
+            db_path=db_path,
+            history_size=history_size,
+            history_retention_days=history_retention_days,
+        )
+    
+    logger.info(f"Starting fleet server for: {config.get('organization.name')}")
+    logger.info(
+        f"Using persistent data store at: {db_path} "
+        f"(history_size={history_size}, history_retention_days={history_retention_days})"
+    )
+    
+    start_fleet_server(port=port, api_key=api_key, data_store=data_store, host=host, 
+                       web_username=web_username, web_password=web_password,
+                       ssl_cert=ssl_cert, ssl_key=ssl_key, encryption_key=encryption_key)
+
+
+def get_settings_info_html(data_store) -> str:
+    """Generate settings info HTML page with server system information"""
+    import os
+    import socket
+    import platform
+    import psutil
+    
+    # Get storage info
+    storage_info = {}
+    if hasattr(data_store, 'storage_info'):
+        try:
+            storage_info = data_store.storage_info()
+        except Exception as e:
+            storage_info = {'error': str(e)}
+    
+    # Get database file info
+    db_path = getattr(data_store, 'db_path', 'Unknown')
+    db_size = 0
+    db_path_obj = Path(db_path) if db_path != 'Unknown' else None
+    if db_path_obj and db_path_obj.exists():
+        db_size = db_path_obj.stat().st_size
+    
+    # Format size
+    def format_bytes(bytes_val):
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if bytes_val < 1024:
+                return f"{bytes_val:.2f} {unit}"
+            bytes_val /= 1024
+        return f"{bytes_val:.2f} TB"
+    
+    # Get machine count
+    machine_count = len(data_store.get_all_machines()) if hasattr(data_store, 'get_all_machines') else 0
+    
+    # Get server process info
+    current_process = psutil.Process(os.getpid())
+    server_cpu = current_process.cpu_percent(interval=0.1)
+    server_memory = current_process.memory_info().rss
+    
+    # Get system info
+    system_cpu = psutil.cpu_percent(interval=0.1)
+    system_memory = psutil.virtual_memory()
+    disk_usage = psutil.disk_usage('/')
+    
+    # Get IP address
+    hostname = socket.gethostname()
+    try:
+        local_ip = socket.gethostbyname(hostname)
+    except (socket.gaierror, socket.herror, OSError):
+        local_ip = "Unknown"
+    
+    # Get computer name (friendly name) on macOS
+    computer_name = hostname
+    if platform.system() == 'Darwin':
+        try:
+            import subprocess
+            result = subprocess.run(['scutil', '--get', 'ComputerName'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                computer_name = result.stdout.strip()
+        except (subprocess.SubprocessError, OSError, TimeoutError):
+            pass
+    
+    # Get serial number on macOS
+    serial_number = "Unknown"
+    if platform.system() == 'Darwin':
+        try:
+            import subprocess
+            result = subprocess.run(['ioreg', '-l'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'IOPlatformSerialNumber' in line:
+                        serial_number = line.split('=')[1].strip().strip('"')
+                        break
+        except (subprocess.SubprocessError, OSError, TimeoutError):
+            pass
+    
+    # Get macOS version
+    macos_version = platform.mac_ver()[0] if platform.system() == 'Darwin' else platform.version()
+    
+    return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings Info - Fleet Dashboard</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            background: #0a0a0a;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            padding: 40px;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #00ff00;
+        }}
+        h1 {{
+            color: #00ff00;
+            font-size: 32px;
+        }}
+        .back-button {{
+            background: linear-gradient(135deg, #00ff00, #00cc00);
+            color: #000;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+        }}
+        .back-button:hover {{
+            background: linear-gradient(135deg, #00cc00, #009900);
+        }}
+        .info-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        .info-card {{
+            background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+            border: 2px solid #00ff00;
+            border-radius: 15px;
+            padding: 25px;
+        }}
+        .info-card h2 {{
+            color: #00ff00;
+            font-size: 18px;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        .info-item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+        }}
+        .info-item:last-child {{
+            border-bottom: none;
+        }}
+        .info-label {{
+            color: #999;
+            font-size: 14px;
+        }}
+        .info-value {{
+            color: #fff;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        .status-good {{
+            color: #00ff00;
+        }}
+        .status-warning {{
+            color: #ffd93d;
+        }}
+        .code-block {{
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Settings Information</h1>
+            <a href="/dashboard" class="back-button">← Back to Dashboard</a>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-card">
+                <h2> Fleet Server</h2>
+                <div class="info-item">
+                    <span class="info-label">CPU Usage</span>
+                    <span class="info-value {'status-warning' if server_cpu > 50 else 'status-good'}">{server_cpu:.1f}%</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">RAM Usage</span>
+                    <span class="info-value status-good">{format_bytes(server_memory)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Process ID</span>
+                    <span class="info-value">{os.getpid()}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Status</span>
+                    <span class="info-value status-good">✓ Running</span>
+                </div>
+            </div>
+            
+            <div class="info-card">
+                <h2>Host System</h2>
+                <div class="info-item">
+                    <span class="info-label">Computer Name</span>
+                    <span class="info-value">{computer_name}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Serial Number</span>
+                    <span class="info-value">{serial_number}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">IP Address</span>
+                    <span class="info-value">{local_ip}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">macOS Version</span>
+                    <span class="info-value">{macos_version}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">System CPU</span>
+                    <span class="info-value {'status-warning' if system_cpu > 70 else 'status-good'}">{system_cpu:.1f}%</span>
+                </div>
+            </div>
+            
+            <div class="info-card">
+                <h2> Storage</h2>
+                <div class="info-item">
+                    <span class="info-label">Disk Space Used</span>
+                    <span class="info-value">{format_bytes(disk_usage.used)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Disk Space Free</span>
+                    <span class="info-value status-good">{format_bytes(disk_usage.free)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Total Disk</span>
+                    <span class="info-value">{format_bytes(disk_usage.total)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Disk Usage</span>
+                    <span class="info-value {'status-warning' if disk_usage.percent > 80 else 'status-good'}">{disk_usage.percent:.1f}%</span>
+                </div>
+            </div>
+            
+            <div class="info-card">
+                <h2>🧠 System Memory</h2>
+                <div class="info-item">
+                    <span class="info-label">RAM Used</span>
+                    <span class="info-value">{format_bytes(system_memory.used)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">RAM Available</span>
+                    <span class="info-value status-good">{format_bytes(system_memory.available)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Total RAM</span>
+                    <span class="info-value">{format_bytes(system_memory.total)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Memory Usage</span>
+                    <span class="info-value {'status-warning' if system_memory.percent > 80 else 'status-good'}">{system_memory.percent:.1f}%</span>
+                </div>
+            </div>
+            
+            <div class="info-card">
+                <h2> Database</h2>
+                <div class="info-item">
+                    <span class="info-label">Type</span>
+                    <span class="info-value">SQLite</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Location</span>
+                    <span class="info-value">{db_path}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Database Size</span>
+                    <span class="info-value status-good">{format_bytes(db_size)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Machines Tracked</span>
+                    <span class="info-value">{machine_count}</span>
+                </div>
+            </div>
+            
+            <div class="info-card">
+                <h2>📈 Configuration</h2>
+                <div class="info-item">
+                    <span class="info-label">History Size</span>
+                    <span class="info-value">{getattr(data_store, 'history_size', 'N/A')}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Retention Days</span>
+                    <span class="info-value">{getattr(data_store, 'history_retention_days', 'Unlimited')}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Storage Type</span>
+                    <span class="info-value">{'Encrypted' if 'Encrypted' in str(type(data_store).__name__) else 'Unencrypted'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Backend</span>
+                    <span class="info-value">Persistent SQLite</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-card">
+            <h2>Storage Details</h2>
+            <div class="code-block">
+{json.dumps(storage_info, indent=2) if storage_info else 'No additional storage information available'}
+            </div>
+        </div>
+    </div>
+</body>
+</html>'''
+
+
+if __name__ == '__main__':
+    main()

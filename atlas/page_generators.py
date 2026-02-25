@@ -22,6 +22,56 @@ def get_homepage_html():
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ATLAS Agent - System Monitor</title>
 <style>
+    :root {
+        --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+        --font-mono: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+        --text-xs: clamp(10px, 0.7vw, 11px);
+        --text-sm: clamp(12px, 0.85vw, 13px);
+        --text-base: clamp(14px, 1vw, 16px);
+        --text-lg: clamp(16px, 1.15vw, 18px);
+        --text-xl: clamp(18px, 1.4vw, 22px);
+        --text-2xl: clamp(22px, 1.8vw, 28px);
+        --text-3xl: clamp(26px, 2.2vw, 32px);
+        --text-4xl: clamp(32px, 3vw, 48px);
+
+        --space-1: 4px; --space-2: 8px; --space-3: 12px;
+        --space-4: 16px; --space-5: 20px; --space-6: 24px;
+        --space-7: 32px; --space-8: 40px; --space-9: 48px; --space-10: 64px;
+
+        --color-bg: #0c0c14;
+        --color-bg-elevated: #161620;
+        --color-bg-surface: #1c1c28;
+        --color-text-primary: #E8E8F0;
+        --color-text-secondary: #9898A8;
+        --color-text-tertiary: #5C5C6E;
+        --color-accent: #00E5A0;
+        --color-accent-hover: #00C890;
+        --color-accent-dim: rgba(0, 229, 160, 0.12);
+        --color-secondary: #00C8FF;
+        --color-warning: #FFB84D;
+        --color-error: #FF6B6B;
+
+        --border-subtle: rgba(255, 255, 255, 0.04);
+        --border-medium: rgba(255, 255, 255, 0.08);
+        --border-accent: rgba(0, 229, 160, 0.35);
+        --border-glass: rgba(255, 255, 255, 0.12);
+
+        --glass-blur: blur(12px) saturate(160%);
+        --glass-bg: rgba(22, 22, 32, 0.65);
+
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+        --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45), 0 4px 8px rgba(0, 0, 0, 0.3);
+        --shadow-glow: 0 0 24px rgba(0, 229, 160, 0.15);
+        --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+        --radius-sm: 8px; --radius-md: 14px; --radius-lg: 20px; --radius-xl: 24px;
+
+        --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+        --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
     * {
         margin: 0;
         padding: 0;
@@ -29,11 +79,41 @@ def get_homepage_html():
     }
 
     body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-        color: #fff;
+        font-family: var(--font-system);
+        background: var(--color-bg);
+        color: var(--color-text-primary);
+        font-size: var(--text-base);
+        line-height: 1.5;
         min-height: 100vh;
-        padding: 20px;
+        padding: var(--space-7);
+        position: relative;
+        overflow-x: hidden;
+    }
+
+    /* Ambient mesh gradient */
+    body::before {
+        content: '';
+        position: fixed;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background:
+            radial-gradient(circle at 20% 30%, rgba(0, 229, 160, 0.07) 0%, transparent 50%),
+            radial-gradient(circle at 80% 70%, rgba(0, 200, 255, 0.05) 0%, transparent 50%),
+            radial-gradient(circle at 50% 90%, rgba(100, 0, 255, 0.03) 0%, transparent 40%);
+        filter: blur(60px);
+        opacity: 0.6;
+        z-index: -1;
+        animation: mesh-float 30s ease-in-out infinite;
+        will-change: transform;
+        pointer-events: none;
+    }
+
+    @keyframes mesh-float {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33% { transform: translate(30px, -30px) scale(1.1); }
+        66% { transform: translate(-20px, 20px) scale(0.9); }
     }
 
     .container {
@@ -44,47 +124,52 @@ def get_homepage_html():
     /* Header */
     header {
         text-align: center;
-        margin-bottom: 50px;
-        padding: 30px 0;
+        margin-bottom: var(--space-10);
+        padding: var(--space-8) 0;
     }
 
     header h1 {
-        font-size: 48px;
-        background: linear-gradient(135deg, #00E5A0, #00C890);
+        font-size: var(--text-4xl);
+        font-weight: 700;
+        letter-spacing: -1px;
+        background: linear-gradient(135deg, var(--color-accent), var(--color-secondary));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-        margin-bottom: 10px;
+        margin-bottom: var(--space-3);
     }
 
     header p {
-        font-size: 18px;
-        color: #888;
+        font-size: var(--text-lg);
+        color: var(--color-text-secondary);
+        letter-spacing: 0.3px;
     }
 
     .status-bar {
         display: flex;
         justify-content: center;
-        gap: 20px;
-        margin-top: 20px;
+        gap: var(--space-4);
+        margin-top: var(--space-6);
         flex-wrap: wrap;
     }
 
     .status-item {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 16px;
-        background: rgba(255,255,255,0.05);
-        border-radius: 20px;
-        border: 1px solid rgba(255,255,255,0.1);
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-4);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-medium);
+        font-size: var(--text-sm);
     }
 
     .status-indicator {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #00E5A0;
+        background: var(--color-accent);
         animation: pulse 2s infinite;
     }
 
@@ -95,16 +180,16 @@ def get_homepage_html():
 
     /* Category Sections */
     .category-section {
-        margin-bottom: 50px;
+        margin-bottom: var(--space-10);
     }
 
     .category-header {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 25px;
-        padding-bottom: 15px;
-        border-bottom: 2px solid rgba(0,255,0,0.3);
+        gap: var(--space-3);
+        margin-bottom: var(--space-7);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--border-accent);
     }
 
     .category-icon {
@@ -112,32 +197,41 @@ def get_homepage_html():
     }
 
     .category-header h2 {
-        font-size: 28px;
-        color: #00E5A0;
+        font-size: var(--text-2xl);
+        font-weight: 700;
+        color: var(--color-accent);
+        letter-spacing: -0.3px;
     }
 
     .category-description {
-        color: #999;
-        font-size: 14px;
-        margin-top: 5px;
+        color: var(--color-text-tertiary);
+        font-size: var(--text-sm);
+        margin-top: var(--space-1);
     }
 
     /* Feature Cards Grid */
     .features-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 20px;
+        gap: var(--space-5);
     }
 
     .feature-card {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 15px;
-        padding: 25px;
-        transition: all 0.3s;
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--border-medium);
+        border-radius: var(--radius-md);
+        padding: var(--space-6);
+        transition: transform var(--transition-base),
+                    box-shadow var(--transition-base),
+                    border-color var(--transition-base);
         cursor: pointer;
         position: relative;
         overflow: hidden;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+        box-shadow: var(--shadow-card);
     }
 
     .feature-card::before {
@@ -146,17 +240,18 @@ def get_homepage_html():
         top: 0;
         left: 0;
         right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, #00E5A0, #00C890);
+        height: 2px;
+        background: linear-gradient(90deg, var(--color-accent), var(--color-secondary));
         transform: scaleX(0);
-        transition: transform 0.3s;
+        transition: transform var(--transition-base);
+        transform-origin: left;
     }
 
     .feature-card:hover {
-        background: rgba(0,255,0,0.05);
-        border-color: rgba(0,255,0,0.5);
-        transform: translateY(-5px);
-        box-shadow: 0 10px 30px rgba(0,255,0,0.2);
+        background: rgba(22, 22, 32, 0.8);
+        border-color: var(--border-accent);
+        transform: translateY(-2px) scale(1.005);
+        box-shadow: var(--shadow-lg), var(--shadow-glow);
     }
 
     .feature-card:hover::before {
@@ -164,45 +259,46 @@ def get_homepage_html():
     }
 
     .feature-icon {
-        font-size: 48px;
-        margin-bottom: 15px;
+        font-size: 40px;
+        margin-bottom: var(--space-4);
     }
 
     .feature-title {
-        font-size: 20px;
+        font-size: var(--text-lg);
         font-weight: 600;
-        margin-bottom: 10px;
-        color: #fff;
+        margin-bottom: var(--space-2);
+        color: var(--color-text-primary);
     }
 
     .feature-description {
-        color: #aaa;
-        font-size: 14px;
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
         line-height: 1.6;
-        margin-bottom: 15px;
+        margin-bottom: var(--space-4);
     }
 
     .feature-tags {
         display: flex;
-        gap: 8px;
+        gap: var(--space-2);
         flex-wrap: wrap;
     }
 
     .feature-tag {
-        padding: 4px 10px;
-        background: rgba(0,255,0,0.1);
-        border: 1px solid rgba(0,255,0,0.3);
-        border-radius: 12px;
-        font-size: 11px;
-        color: #00E5A0;
+        padding: 3px 10px;
+        background: var(--color-accent-dim);
+        border: 1px solid var(--border-accent);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+        color: var(--color-accent);
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        font-weight: 500;
     }
 
     .feature-tag.advanced {
-        background: rgba(255,0,255,0.1);
-        border-color: rgba(255,0,255,0.3);
-        color: #ff00ff;
+        background: rgba(160, 80, 255, 0.12);
+        border-color: rgba(160, 80, 255, 0.35);
+        color: #c084fc;
     }
 
     /* Tooltips */
@@ -212,11 +308,11 @@ def get_homepage_html():
         height: 18px;
         line-height: 18px;
         text-align: center;
-        background: rgba(79, 195, 247, 0.2);
-        border: 1px solid rgba(79, 195, 247, 0.5);
+        background: rgba(0, 200, 255, 0.15);
+        border: 1px solid rgba(0, 200, 255, 0.4);
         border-radius: 50%;
         font-size: 12px;
-        color: #4fc3f7;
+        color: var(--color-secondary);
         cursor: help;
         margin-left: 6px;
         position: relative;
@@ -224,8 +320,8 @@ def get_homepage_html():
     }
 
     .info-icon:hover {
-        background: rgba(79, 195, 247, 0.3);
-        border-color: #4fc3f7;
+        background: rgba(0, 200, 255, 0.25);
+        border-color: var(--color-secondary);
     }
 
     .tooltip-container {
@@ -236,22 +332,23 @@ def get_homepage_html():
     .tooltip-text {
         visibility: hidden;
         width: 250px;
-        background-color: #1a1a1a;
-        color: #fff;
+        background-color: var(--color-bg-surface);
+        color: var(--color-text-primary);
         text-align: left;
-        border-radius: 8px;
-        padding: 12px;
+        border-radius: var(--radius-sm);
+        padding: var(--space-3);
         position: absolute;
         z-index: 1000;
         bottom: 125%;
         left: 50%;
         margin-left: -125px;
         opacity: 0;
-        transition: opacity 0.3s, visibility 0.3s;
-        border: 1px solid #4fc3f7;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-        font-size: 13px;
+        transition: opacity var(--transition-base), visibility var(--transition-base);
+        border: 1px solid var(--border-glass);
+        box-shadow: var(--shadow-lg);
+        font-size: var(--text-sm);
         line-height: 1.5;
+        backdrop-filter: var(--glass-blur);
     }
 
     .tooltip-text::after {
@@ -262,7 +359,7 @@ def get_homepage_html():
         margin-left: -5px;
         border-width: 5px;
         border-style: solid;
-        border-color: #4fc3f7 transparent transparent transparent;
+        border-color: var(--border-glass) transparent transparent transparent;
     }
 
     .info-icon:hover .tooltip-text,
@@ -273,64 +370,72 @@ def get_homepage_html():
 
     /* Quick Actions */
     .quick-actions {
-        background: rgba(0,255,0,0.05);
-        border: 2px solid rgba(0,255,0,0.2);
-        border-radius: 15px;
-        padding: 30px;
-        margin-top: 50px;
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--border-accent);
+        border-radius: var(--radius-lg);
+        padding: var(--space-8);
+        margin-top: var(--space-10);
         text-align: center;
+        box-shadow: var(--shadow-card);
     }
 
     .quick-actions h3 {
-        color: #00E5A0;
-        margin-bottom: 20px;
-        font-size: 24px;
+        color: var(--color-accent);
+        margin-bottom: var(--space-6);
+        font-size: var(--text-2xl);
+        font-weight: 700;
     }
 
     .action-buttons {
         display: flex;
         justify-content: center;
-        gap: 15px;
+        gap: var(--space-4);
         flex-wrap: wrap;
     }
 
     .action-button {
-        padding: 12px 28px;
-        background: linear-gradient(135deg, #00E5A0, #00C890);
-        color: #0a0a0a;
+        padding: var(--space-3) var(--space-7);
+        background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+        color: var(--color-bg);
         border: none;
-        border-radius: 8px;
-        font-size: 16px;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-base);
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.3s;
+        transition: transform var(--transition-base), box-shadow var(--transition-base);
         text-decoration: none;
         display: inline-block;
     }
 
     .action-button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(0,255,0,0.4);
+        box-shadow: var(--shadow-md), var(--shadow-glow);
     }
 
     .action-button.secondary {
-        background: rgba(255,255,255,0.1);
-        color: #fff;
-        border: 1px solid rgba(255,255,255,0.3);
+        background: rgba(255,255,255,0.06);
+        color: var(--color-text-primary);
+        border: 1px solid var(--border-medium);
+    }
+
+    .action-button.secondary:hover {
+        border-color: var(--border-accent);
+        background: var(--color-accent-dim);
     }
 
     /* Footer */
     footer {
-        margin-top: 60px;
-        padding-top: 30px;
-        border-top: 1px solid rgba(255,255,255,0.1);
+        margin-top: var(--space-10);
+        padding-top: var(--space-7);
+        border-top: 1px solid var(--border-subtle);
         text-align: center;
-        color: #666;
-        font-size: 14px;
+        color: var(--color-text-tertiary);
+        font-size: var(--text-sm);
     }
 
     footer a {
-        color: #00E5A0;
+        color: var(--color-accent);
         text-decoration: none;
     }
 
@@ -344,13 +449,13 @@ def get_homepage_html():
         top: -100%;
         left: 50%;
         transform: translateX(-50%);
-        background: #00E5A0;
-        color: #111;
-        padding: 8px 16px;
-        border-radius: 8px;
+        background: var(--color-accent);
+        color: var(--color-bg);
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-sm);
         font-weight: 600;
         z-index: 10000;
-        transition: top 0.15s ease;
+        transition: top var(--transition-fast);
         text-decoration: none;
     }
 
@@ -365,20 +470,37 @@ def get_homepage_html():
     }
 
     :focus-visible {
-        outline: 2px solid #00E5A0;
+        outline: 2px solid var(--color-accent);
         outline-offset: 2px;
     }
 
-    /* Feature Card Focus State */
     .feature-card:focus-visible {
-        outline: 2px solid #00E5A0;
+        outline: 2px solid var(--color-accent);
         outline-offset: 4px;
     }
 
-    /* Action Button Focus State */
     .action-button:focus-visible {
-        outline: 2px solid #00E5A0;
+        outline: 2px solid var(--color-accent);
         outline-offset: 2px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        body { padding: var(--space-4); }
+        header { margin-bottom: var(--space-8); padding: var(--space-5) 0; }
+        header h1 { font-size: var(--text-3xl); }
+        .category-section { margin-bottom: var(--space-8); }
+        .features-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+        .quick-actions { padding: var(--space-6); }
+        .feature-card:hover { transform: none; }
+    }
+
+    @media (max-width: 480px) {
+        body { padding: var(--space-2); }
+        header h1 { font-size: var(--text-2xl); }
+        .status-bar { gap: var(--space-2); }
+        .status-item { padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
+        .action-buttons { flex-direction: column; align-items: center; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -670,13 +792,13 @@ def get_homepage_html():
     <!-- Footer -->
     <footer role="contentinfo">
         <p><strong>ATLAS Agent v1.0.0</strong> | Enterprise-grade monitoring for everyone</p>
-        <nav style="margin-top: 10px;" aria-label="Footer navigation">
+        <nav style="margin-top: var(--space-3);" aria-label="Footer navigation">
             <a href="/api/system/comprehensive">API Docs</a> ·
             <a href="/help">Help</a> ·
             <a href="/about">About</a>
         </nav>
-        <p style="margin-top: 15px; color: #444;">
-            All data processed locally • No cloud dependencies • Open source
+        <p style="margin-top: var(--space-4); color: var(--color-text-tertiary);">
+            All data processed locally &bull; No cloud dependencies &bull; Open source
         </p>
     </footer>
 </div>

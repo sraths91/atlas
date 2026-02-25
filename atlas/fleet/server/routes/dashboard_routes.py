@@ -203,7 +203,16 @@ def register_dashboard_routes(router, data_store, auth_manager):
         })
 
 
+    # GET /api/health - Basic health check (unauthenticated, for load balancers/agents)
+    def handle_health(handler):
+        """Basic server health check"""
+        send_json(handler, {
+            'status': 'healthy',
+            'timestamp': time.time()
+        })
+
     # Register routes with router
+    router.get('/api/health', handle_health)
     router.get('/api/fleet/machines', handle_get_machines)
     router.get('/api/fleet/summary', handle_get_summary)
     router.get('/api/fleet/server-resources', handle_get_server_resources)

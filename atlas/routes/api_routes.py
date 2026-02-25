@@ -718,6 +718,13 @@ def dispatch_get(handler, path):
             'severities': [s.value for s in AlertSeverity]
         })
 
+    # ==================== OSI Layers Diagnostic ====================
+
+    elif path == '/api/osi-layers':
+        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+        monitor = get_osi_diagnostic_monitor()
+        handler.serve_json(monitor.get_last_result())
+
     else:
         return False
 
@@ -1165,6 +1172,23 @@ def dispatch_post(handler, path):
 
     elif path.startswith('/api/wifi/export'):
         _handle_encrypted_export(handler, 'wifi')
+
+    # ==================== OSI Layers Diagnostic ====================
+
+    elif path == '/api/osi-layers/test':
+        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+        from dataclasses import asdict
+        monitor = get_osi_diagnostic_monitor()
+        result = monitor.run_diagnostic()
+        result_dict = asdict(result)
+        monitor.update_last_result(result_dict)
+        handler.serve_json({'status': 'success', 'result': result_dict})
+
+    elif path == '/api/osi-layers/network-quality':
+        _handle_network_quality(handler)
+
+    elif path == '/api/osi-layers/custom-scan':
+        _handle_custom_scan(handler)
 
     else:
         return False
@@ -1786,3 +1810,143 @@ def _handle_encrypted_export(handler, export_type):
     handler.end_headers()
     handler.wfile.write(encrypted_bytes)
     _log_export_event(export_type, export_format, filename, True, mode)
+
+
+def _grade_bufferbloat(idle_ms: float, loaded_ms: float) -> str:
+    """Grade bufferbloat severity from idle vs loaded latency ratio.
+
+    Returns letter grade A-F based on how much latency increases under load.
+    """
+    if idle_ms <= 0:
+        return 'N/A'
+    ratio = loaded_ms / idle_ms
+    if ratio < 1.5:
+        return 'A'
+    elif ratio < 3.0:
+        return 'B'
+    elif ratio < 5.0:
+        return 'C'
+    elif ratio < 10.0:
+        return 'D'
+    return 'F'
+
+
+def _handle_network_quality(handler):
+    """Handle POST /api/osi-layers/network-quality endpoint.
+
+    Runs macOS `networkQuality -c -s` command and parses JSON output.
+    Returns throughput (Mbps), responsiveness (RPM), latency, and bufferbloat grade.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ['networkQuality', '-c', '-s'],
+            capture_output=True, text=True, timeout=45
+        )
+        if proc.returncode != 0:
+            handler.serve_json({
+                'error': f'networkQuality exited with code {proc.returncode}',
+                'stderr': proc.stderr[:500] if proc.stderr else ''
+            })
+            return
+
+        data = json.loads(proc.stdout)
+
+        dl_throughput = data.get('dl_throughput', 0) / 1_000_000  # bps -> Mbps
+        ul_throughput = data.get('ul_throughput', 0) / 1_000_000
+        dl_responsiveness = data.get('dl_responsiveness', 0)  # RPM
+        ul_responsiveness = data.get('ul_responsiveness', 0)
+        idle_latency = data.get('idle_latency_ms', 0) or data.get('base_rtt', 0)
+        dl_loaded_latency = data.get('dl_latency_ms', 0) or data.get('dl_loaded_latency_ms', 0)
+        ul_loaded_latency = data.get('ul_latency_ms', 0) or data.get('ul_loaded_latency_ms', 0)
+
+        # Use the worse loaded latency for grading
+        loaded_latency = max(dl_loaded_latency, ul_loaded_latency)
+        grade = _grade_bufferbloat(idle_latency, loaded_latency) if idle_latency > 0 else 'N/A'
+
+        handler.serve_json({
+            'status': 'success',
+            'download_mbps': round(dl_throughput, 1),
+            'upload_mbps': round(ul_throughput, 1),
+            'dl_responsiveness_rpm': dl_responsiveness,
+            'ul_responsiveness_rpm': ul_responsiveness,
+            'idle_latency_ms': round(idle_latency, 1),
+            'dl_loaded_latency_ms': round(dl_loaded_latency, 1),
+            'ul_loaded_latency_ms': round(ul_loaded_latency, 1),
+            'bufferbloat_grade': grade,
+            'raw': data
+        })
+
+    except FileNotFoundError:
+        handler.serve_json({
+            'error': 'networkQuality command not found (requires macOS 12+)',
+            'status': 'unavailable'
+        })
+    except subprocess.TimeoutExpired:
+        handler.serve_json({
+            'error': 'networkQuality timed out after 45 seconds',
+            'status': 'timeout'
+        })
+    except (json.JSONDecodeError, KeyError) as e:
+        handler.serve_json({
+            'error': f'Failed to parse networkQuality output: {e}',
+            'status': 'parse_error'
+        })
+    except Exception as e:
+        logger.error(f"networkQuality error: {e}")
+        handler.serve_json({
+            'error': str(e),
+            'status': 'error'
+        })
+
+
+def _handle_custom_scan(handler):
+    """Handle POST /api/osi-layers/custom-scan endpoint.
+
+    Accepts custom targets and runs a one-time scan.
+    Body JSON keys: ports, ping_targets, dns_hostnames, http_urls, tls_targets
+    """
+    body = handler._read_body()
+    if body is None:
+        return
+
+    try:
+        options = json.loads(body.decode('utf-8')) if body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'Invalid JSON body'}).encode())
+        return
+
+    # Validate: at least one scan target must be provided
+    has_targets = any(
+        options.get(k) for k in ('ports', 'ping_targets', 'dns_hostnames', 'http_urls', 'tls_targets')
+    )
+    if not has_targets:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'No scan targets provided'}).encode())
+        return
+
+    # Cap total targets to prevent abuse
+    total_targets = sum(
+        len(options.get(k, [])) for k in ('ports', 'ping_targets', 'dns_hostnames', 'http_urls', 'tls_targets')
+    )
+    if total_targets > 50:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'Too many targets (max 50)'}).encode())
+        return
+
+    try:
+        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+        monitor = get_osi_diagnostic_monitor()
+        result = monitor.run_custom_scan(options)
+        handler.serve_json({'status': 'success', 'result': result})
+    except Exception as e:
+        logger.error(f"Custom scan error: {e}")
+        handler.serve_json({'error': str(e), 'status': 'error'})

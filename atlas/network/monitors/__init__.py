@@ -26,6 +26,7 @@ from .udp_quality_monitor import UDPQualityMonitor, UDPEchoServer, get_udp_quali
 from .tcp_connection_tester import TCPConnectionTester, ConnectionTestServer, get_tcp_connection_tester
 from .throughput_tester import ThroughputTester, ThroughputServer, get_throughput_tester
 from .network_quality_monitor import NetworkQualityMonitor, get_network_quality_monitor
+from .osi_diagnostic_monitor import OSIDiagnosticMonitor, get_osi_diagnostic_monitor
 
 # Quality metrics
 from .mos_calculator import (
@@ -53,6 +54,7 @@ __all__ = [
     'TCPConnectionTester', 'ConnectionTestServer', 'get_tcp_connection_tester',
     'ThroughputTester', 'ThroughputServer', 'get_throughput_tester',
     'NetworkQualityMonitor', 'get_network_quality_monitor',
+    'OSIDiagnosticMonitor', 'get_osi_diagnostic_monitor',
 
     # Quality metrics
     'MOSCalculator', 'MOSResult', 'NetworkMetrics', 'CodecType',

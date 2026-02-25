@@ -345,7 +345,7 @@ def get_homepage_html():
         left: 50%;
         transform: translateX(-50%);
         background: #00E5A0;
-        color: #000;
+        color: #111;
         padding: 8px 16px;
         border-radius: 8px;
         font-weight: 600;
@@ -511,6 +511,18 @@ def get_homepage_html():
                 <div class="feature-tags" aria-label="Tags">
                     <span class="feature-tag advanced">Advanced</span>
                     <span class="feature-tag advanced">AI-Powered</span>
+                </div>
+            </a>
+
+            <a class="feature-card" href="/widget/osi-layers" role="listitem" tabindex="0">
+                <div class="feature-icon" aria-hidden="true"></div>
+                <div class="feature-title">OSI Layer Diagnostic</div>
+                <div class="feature-description">
+                    Test all 7 OSI layers from Physical to Application. Instantly pinpoint which network layer is causing issues with waterfall failure detection.
+                </div>
+                <div class="feature-tags" aria-label="Tags">
+                    <span class="feature-tag advanced">Diagnostic</span>
+                    <span class="feature-tag">7 Layers</span>
                 </div>
             </a>
         </div>
@@ -1136,7 +1148,7 @@ def get_help_html():
         left: 50%;
         transform: translateX(-50%);
         background: #00E5A0;
-        color: #000;
+        color: #111;
         padding: 8px 16px;
         border-radius: 8px;
         font-weight: 600;
@@ -1374,6 +1386,12 @@ def get_help_html():
                 <h4>Network Testing</h4>
                 <p>VoIP quality, throughput, and connection rate testing in one tabbed view.</p>
                 <code>/widget/network-testing</code>
+            </a>
+            <a href="/widget/osi-layers" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>OSI Layers</h4>
+                <p>7-layer network diagnostic showing pass/fail per OSI layer with waterfall blocking.</p>
+                <code>/widget/osi-layers</code>
             </a>
             <a href="/widget/alert-rules" class="widget-card">
                 <span class="widget-category cat-diagnostic">Diagnostic</span>
@@ -1967,11 +1985,11 @@ def get_dashboard_html():
         --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
         --text-xs: 11px;
         --text-sm: 13px;
-        --text-base: 15px;
-        --text-lg: 17px;
-        --text-xl: 21px;
+        --text-base: 16px;
+        --text-lg: 18px;
+        --text-xl: 22px;
         --text-2xl: 28px;
-        --text-3xl: 36px;
+        --text-3xl: 32px;
 
         /* Colors - Primary Palette */
         --color-bg: #121212;
@@ -2069,7 +2087,7 @@ def get_dashboard_html():
        ======================================== */
     .header-container {{
         max-width: 1600px;
-        margin: 0 auto 32px;
+        margin: 0 auto 40px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -2396,6 +2414,11 @@ def get_dashboard_html():
         margin-bottom: 12px;
     }}
 
+    .info p {{
+        max-width: 70ch;
+        line-height: 1.6;
+    }}
+
     .info code {{
         background: rgba(0, 0, 0, 0.4);
         padding: 3px 8px;
@@ -2405,7 +2428,38 @@ def get_dashboard_html():
         font-size: var(--text-sm);
     }}
 
-    /* Responsive Grid (Phase 3) */
+    /* ========================================
+       Global Focus & Interaction States
+       ======================================== */
+    :focus-visible {{
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+        border-radius: 4px;
+    }}
+
+    button:focus-visible,
+    .menu-item:focus-visible,
+    .export-option:focus-visible {{
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }}
+
+    /* Details/Summary disclosure (footer) */
+    details summary {{
+        list-style: none;
+    }}
+    details summary::-webkit-details-marker {{
+        display: none;
+    }}
+    details[open] summary span {{
+        display: none;
+    }}
+
+    /* ========================================
+       Responsive Design — Automatic Breakpoints
+       ======================================== */
+
+    /* --- Large Desktop (≤1400px) --- */
     @media (max-width: 1400px) {{
         .dashboard > iframe,
         .dashboard > .widget-iframe-container {{
@@ -2414,8 +2468,6 @@ def get_dashboard_html():
         .dashboard > .stacked-container {{
             grid-column: span 6;
         }}
-
-        /* Adjust widget spans for medium screens */
         .widget-span-1 {{
             grid-column: span 6 !important;
         }}
@@ -2424,22 +2476,27 @@ def get_dashboard_html():
         }}
     }}
 
+    /* --- Tablet (≤768px) --- */
     @media (max-width: 768px) {{
-        .dashboard {{
-            grid-template-columns: repeat(6, 1fr);
-        }}
-        .dashboard > iframe,
-        .dashboard > .widget-iframe-container {{
-            grid-column: span 6;
-        }}
-        .dashboard > .stacked-container {{
-            grid-column: span 6;
+        body {{
+            padding: 12px;
         }}
 
-        /* Full width on mobile */
+        .dashboard {{
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }}
+
+        .dashboard > iframe,
+        .dashboard > .widget-iframe-container,
+        .dashboard > .stacked-container {{
+            grid-column: 1 / -1;
+        }}
+
         .widget-span-1,
-        .widget-span-2 {{
-            grid-column: span 6 !important;
+        .widget-span-2,
+        .widget-full-width {{
+            grid-column: 1 / -1 !important;
         }}
 
         .widget-iframe-container, iframe {{
@@ -2447,12 +2504,288 @@ def get_dashboard_html():
             min-height: 350px;
             max-height: 80vh;
         }}
+
+        /* Header: stack title center, controls at edges */
+        .header-container {{
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }}
+
+        h1 {{
+            font-size: var(--text-2xl);
+        }}
+
+        .header-container > div:first-child {{
+            order: 2;
+        }}
+        .header-container > div:nth-child(2) {{
+            order: 1;
+            flex-basis: 100%;
+            text-align: center;
+        }}
+        .header-container > button.hamburger {{
+            order: 3;
+        }}
+
+        /* Menu: full-width dropdown */
+        .menu {{
+            right: 0;
+            left: 0;
+            min-width: unset;
+            border-radius: 12px;
+        }}
+
+        /* Submenus: inline instead of fly-out */
+        .submenu {{
+            position: static;
+            margin-right: 0;
+            margin-top: 4px;
+            border: none;
+            border-left: 2px solid var(--border-accent);
+            border-radius: 0;
+            padding: 4px 0 4px 8px;
+            box-shadow: none;
+            backdrop-filter: none;
+            background: transparent;
+        }}
+
+        /* Info section: more compact */
+        .info {{
+            padding: 16px;
+        }}
+        .info p {{
+            font-size: var(--text-sm);
+            line-height: 1.6;
+        }}
+
+        /* Toasts: smaller width */
+        .toast {{
+            min-width: unset;
+            max-width: calc(100vw - 48px);
+        }}
+        .toast-container {{
+            right: 12px;
+            left: 12px;
+        }}
+
+        /* Export dialog: smaller padding */
+        .export-content {{
+            padding: 24px;
+            max-width: 95vw;
+        }}
+
+        /* No hover effects on touch devices */
+        iframe:hover {{
+            transform: none;
+            box-shadow: var(--shadow-md),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border-color: var(--border-medium);
+        }}
+
+        /* Border radius reduction */
+        iframe,
+        .widget-iframe-container iframe {{
+            border-radius: 14px;
+        }}
+
+        .iframe-loading-overlay {{
+            border-radius: 14px;
+        }}
     }}
 
+    /* --- Mobile (≤480px) --- */
     @media (max-width: 480px) {{
+        body {{
+            padding: 8px;
+        }}
+
+        .dashboard {{
+            gap: 10px;
+        }}
+
         .widget-iframe-container, iframe {{
-            min-height: 300px;
+            min-height: 280px;
             max-height: 70vh;
+        }}
+
+        /* Header: compact single-line */
+        .header-container {{
+            gap: 8px;
+            margin-bottom: 12px;
+        }}
+
+        h1 {{
+            font-size: var(--text-xl);
+            margin-bottom: 4px;
+        }}
+
+        /* Hide subtitle on mobile */
+        .header-container > div:nth-child(2) > p {{
+            display: none;
+        }}
+
+        /* E2EE status: icon only */
+        #e2eeStatus {{
+            padding: 6px 8px !important;
+        }}
+        #e2eeText {{
+            display: none !important;
+        }}
+
+        /* Hamburger: slightly smaller */
+        .hamburger {{
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+        }}
+
+        /* Menu: full-screen overlay */
+        .menu {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 0;
+            padding: 60px 16px 16px;
+            overflow-y: auto;
+            z-index: 2000;
+            background: rgba(18, 18, 18, 0.98);
+            backdrop-filter: blur(40px);
+        }}
+
+        /* Menu close area (hamburger stays on top) */
+        .menu.active ~ .hamburger,
+        .hamburger {{
+            z-index: 2001;
+        }}
+
+        .menu-item {{
+            padding: 14px 16px;
+            font-size: var(--text-base);
+        }}
+
+        /* Toasts: full-width */
+        .toast-container {{
+            top: 8px;
+            right: 8px;
+            left: 8px;
+        }}
+        .toast {{
+            max-width: 100%;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: var(--text-sm);
+        }}
+
+        /* Export dialog: full-screen-ish */
+        .export-content {{
+            width: 95vw;
+            padding: 20px;
+            border-radius: 14px;
+        }}
+        .export-options {{
+            flex-direction: column;
+            gap: 10px;
+        }}
+        .export-option {{
+            padding: 14px;
+        }}
+
+        /* Widget settings: mobile-friendly */
+        .widget-settings-panel {{
+            width: 100vw;
+            max-width: 100vw;
+            max-height: 100vh;
+            border-radius: 0;
+        }}
+
+        /* Info section: collapse to summary */
+        .info {{
+            padding: 12px;
+            font-size: var(--text-xs);
+        }}
+        .info h3 {{
+            font-size: var(--text-sm);
+        }}
+        .info code {{
+            font-size: var(--text-xs);
+            padding: 2px 4px;
+        }}
+
+        /* Reduce border radius globally */
+        iframe,
+        .widget-iframe-container iframe {{
+            border-radius: 10px;
+        }}
+        .iframe-loading-overlay {{
+            border-radius: 10px;
+        }}
+        .info {{
+            border-radius: 10px;
+        }}
+
+        /* Reduce ambient background intensity */
+        body::before {{
+            opacity: 0.3;
+            animation: none;
+        }}
+
+        /* Offline banner: compact */
+        .offline-banner {{
+            padding: 8px 12px;
+            font-size: var(--text-xs);
+            border-radius: 8px;
+        }}
+    }}
+
+    /* --- Small Phones (≤360px) --- */
+    @media (max-width: 360px) {{
+        body {{
+            padding: 6px;
+        }}
+        .dashboard {{
+            gap: 8px;
+        }}
+        h1 {{
+            font-size: var(--text-lg);
+        }}
+        .widget-iframe-container, iframe {{
+            min-height: 240px;
+            max-height: 65vh;
+            border-radius: 8px;
+        }}
+        .iframe-loading-overlay {{
+            border-radius: 8px;
+        }}
+    }}
+
+    /* --- Touch Device Hover Override --- */
+    @media (hover: none) and (pointer: coarse) {{
+        iframe:hover {{
+            transform: none !important;
+            box-shadow: var(--shadow-md),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+            border-color: var(--border-medium) !important;
+        }}
+        .menu-item:hover {{
+            transform: none;
+        }}
+        .hamburger:hover {{
+            transform: none;
+        }}
+    }}
+
+    /* --- Landscape Mobile --- */
+    @media (max-height: 500px) and (orientation: landscape) {{
+        .widget-iframe-container, iframe {{
+            min-height: 200px;
+            max-height: 90vh;
+        }}
+        .menu {{
+            max-height: 80vh;
+            overflow-y: auto;
         }}
     }}
     /* ========================================
@@ -3281,19 +3614,48 @@ def get_dashboard_html():
 {_generate_widget_iframes()}
 </div>
 
-<div class="info">
-    <h3>Widget URLs:</h3>
-    <p><strong>System Monitor:</strong> <code>/widget/system-monitor</code> | <strong>WiFi:</strong> <code>/widget/wifi</code> | <strong>WiFi Analyzer:</strong> <code>/widget/wifi-analyzer</code></p>
-    <p><strong>Speed Test:</strong> <code>/widget/speedtest</code> | <strong>Processes:</strong> <code>/widget/processes</code></p>
-    <h3 style="margin-top: 12px;">Enterprise Network Testing:</h3>
-    <p><strong>VoIP Quality:</strong> <code>/widget/voip-quality</code> | <strong>Connection Rate:</strong> <code>/widget/connection-rate</code> | <strong>Throughput:</strong> <code>/widget/throughput</code></p>
-    <h3 style="margin-top: 12px;">Enterprise Services:</h3>
-    <p><strong>VPN Status:</strong> <code>/widget/vpn-status</code> | <strong>SaaS Health:</strong> <code>/widget/saas-health</code> | <strong>Network Quality:</strong> <code>/widget/network-quality</code></p>
-    <h3 style="margin-top: 12px;">Security & Hardware:</h3>
-    <p><strong>Security Dashboard:</strong> <code>/widget/security-dashboard</code> | <strong>System Health:</strong> <code>/widget/system-health</code></p>
-    <p><strong>Power:</strong> <code>/widget/power</code> | <strong>Display:</strong> <code>/widget/display</code> | <strong>Peripherals:</strong> <code>/widget/peripherals</code></p>
-    <p><strong>Disk Health:</strong> <code>/widget/disk-health</code> | <strong>WiFi Roaming:</strong> <code>/widget/wifi-roaming</code> | <strong>Network Analysis:</strong> <code>/widget/network-analysis</code></p>
-</div>
+<footer class="info" role="contentinfo">
+    <details>
+        <summary style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;">
+            <h3 style="margin: 0; display: inline;">Widget URLs</h3>
+            <span style="font-size: var(--text-xs); color: var(--color-text-tertiary);">Click to expand</span>
+        </summary>
+        <div style="margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+            <div>
+                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">System</h3>
+                <p><code>/widget/system-monitor</code></p>
+                <p><code>/widget/processes</code></p>
+                <p><code>/widget/system-health</code></p>
+            </div>
+            <div>
+                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Network</h3>
+                <p><code>/widget/wifi</code></p>
+                <p><code>/widget/wifi-analyzer</code></p>
+                <p><code>/widget/speedtest</code></p>
+                <p><code>/widget/wifi-roaming</code></p>
+                <p><code>/widget/network-analysis</code></p>
+            </div>
+            <div>
+                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Enterprise</h3>
+                <p><code>/widget/voip-quality</code></p>
+                <p><code>/widget/connection-rate</code></p>
+                <p><code>/widget/throughput</code></p>
+                <p><code>/widget/osi-layers</code></p>
+            </div>
+            <div>
+                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Services & Hardware</h3>
+                <p><code>/widget/vpn-status</code></p>
+                <p><code>/widget/saas-health</code></p>
+                <p><code>/widget/network-quality</code></p>
+                <p><code>/widget/security-dashboard</code></p>
+                <p><code>/widget/power</code></p>
+                <p><code>/widget/display</code></p>
+                <p><code>/widget/peripherals</code></p>
+                <p><code>/widget/disk-health</code></p>
+            </div>
+        </div>
+    </details>
+</footer>
 
 <script>
     // E2EE Status Update
@@ -3383,7 +3745,7 @@ def get_dashboard_html():
             'monochrome': {{
                 primary: '#ffffff',
                 secondary: '#666666',
-                background: '#000000'
+                background: '#080808'
             }}
         }};
         
@@ -3834,6 +4196,105 @@ def get_dashboard_html():
         }}
     }});
 
+    // ========================================
+    // Mobile / Desktop Auto-Detection
+    // ========================================
+    const MobileManager = {{
+        _isMobile: false,
+        _isTablet: false,
+        _mediaQueryMobile: window.matchMedia('(max-width: 480px)'),
+        _mediaQueryTablet: window.matchMedia('(max-width: 768px)'),
+        _mediaQueryTouch: window.matchMedia('(hover: none) and (pointer: coarse)'),
+
+        init() {{
+            // Listen for viewport changes (resize, rotation)
+            this._mediaQueryMobile.addEventListener('change', (e) => this._onMobileChange(e));
+            this._mediaQueryTablet.addEventListener('change', (e) => this._onTabletChange(e));
+
+            // Initial detection
+            this._isMobile = this._mediaQueryMobile.matches;
+            this._isTablet = this._mediaQueryTablet.matches;
+            this._applyMode();
+
+            // Handle orientation changes
+            window.addEventListener('orientationchange', () => {{
+                setTimeout(() => this._applyMode(), 100);
+            }});
+
+            // Touch-specific: close menu on outside tap
+            if (this._mediaQueryTouch.matches) {{
+                document.addEventListener('touchstart', (e) => {{
+                    const menu = document.getElementById('menu');
+                    const hamburger = document.getElementById('hamburger');
+                    if (menu.classList.contains('active') &&
+                        !menu.contains(e.target) && !hamburger.contains(e.target)) {{
+                        menu.classList.remove('active');
+                        hamburger.classList.remove('active');
+                        hamburger.setAttribute('aria-expanded', 'false');
+                    }}
+                }}, {{ passive: true }});
+            }}
+        }},
+
+        _onMobileChange(e) {{
+            this._isMobile = e.matches;
+            this._applyMode();
+        }},
+
+        _onTabletChange(e) {{
+            this._isTablet = e.matches;
+            this._applyMode();
+        }},
+
+        _applyMode() {{
+            const body = document.body;
+            body.classList.toggle('is-mobile', this._isMobile);
+            body.classList.toggle('is-tablet', this._isTablet && !this._isMobile);
+            body.classList.toggle('is-desktop', !this._isTablet);
+            body.classList.toggle('is-touch', this._mediaQueryTouch.matches);
+
+            // On mobile, make submenus visible inline when parent is hovered/active
+            if (this._isTablet) {{
+                this._enableInlineSubmenus();
+            }} else {{
+                this._enableFlyoutSubmenus();
+            }}
+        }},
+
+        _enableInlineSubmenus() {{
+            // On mobile/tablet: submenus show on click, inline
+            document.querySelectorAll('.menu-item.has-submenu').forEach(item => {{
+                item.removeAttribute('onmouseenter');
+                item.removeAttribute('onmouseleave');
+                item.onclick = function(e) {{
+                    e.stopPropagation();
+                    const sub = this.querySelector('.submenu');
+                    if (sub) {{
+                        const isActive = sub.classList.contains('active');
+                        // Close all other submenus first
+                        document.querySelectorAll('.submenu.active').forEach(s => s.classList.remove('active'));
+                        if (!isActive) sub.classList.add('active');
+                    }}
+                }};
+            }});
+        }},
+
+        _enableFlyoutSubmenus() {{
+            // On desktop: restore hover behavior
+            document.querySelectorAll('.menu-item.has-submenu').forEach(item => {{
+                item.setAttribute('onmouseenter', "showSubmenu('" + item.querySelector('.submenu').id + "')");
+                item.setAttribute('onmouseleave', "hideSubmenu('" + item.querySelector('.submenu').id + "')");
+                item.onclick = null;
+            }});
+        }},
+
+        isMobile() {{ return this._isMobile; }},
+        isTablet() {{ return this._isTablet; }},
+        isTouch() {{ return this._mediaQueryTouch.matches; }}
+    }};
+
+    MobileManager.init();
+
     // Load saved theme
     const savedTheme = localStorage.getItem('dashboardTheme');
     if (savedTheme) {{
@@ -3844,7 +4305,7 @@ def get_dashboard_html():
             'ocean': {{ primary: '#0080ff', background: '#001a33' }},
             'sunset': {{ primary: '#ff6400', background: '#1a0a00' }},
             'forest': {{ primary: '#00ff64', background: '#0a1a0a' }},
-            'monochrome': {{ primary: '#ffffff', background: '#000000' }}
+            'monochrome': {{ primary: '#ffffff', background: '#080808' }}
         }};
         const theme = themes[savedTheme];
         if (theme) {{

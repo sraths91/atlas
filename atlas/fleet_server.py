@@ -245,7 +245,9 @@ class FleetServerHandler(BaseHTTPRequestHandler):
                 return
 
         if self.router:
-            self.router.dispatch(self, 'GET', self.path)
+            handled = self.router.dispatch(self, 'GET', self.path)
+            if not handled:
+                self.router.send_404(self, self.path.split('?')[0])
         else:
             # Fallback if router not initialized
             logger.error("Router not initialized!")
@@ -1045,7 +1047,9 @@ class FleetServerHandler(BaseHTTPRequestHandler):
                 return
 
         if self.router:
-            self.router.dispatch(self, 'POST', self.path)
+            handled = self.router.dispatch(self, 'POST', self.path)
+            if not handled:
+                self.router.send_404(self, self.path.split('?')[0])
         else:
             # Fallback if router not initialized
             logger.error("Router not initialized!")

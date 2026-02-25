@@ -795,6 +795,14 @@ def start_live_widget_server(port=8767, system_monitor=None, fleet_server=None, 
         except Exception as e:
             logger.error(f"Failed to start application monitor: {e}")
 
+    try:
+        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+        osi_monitor = get_osi_diagnostic_monitor()
+        osi_monitor.start(interval=300)
+        logger.info("OSI Diagnostic monitor started (interval: 300s)")
+    except Exception as e:
+        logger.error(f"Failed to start OSI Diagnostic monitor: {e}")
+
     # Capture e2ee settings for the thread
     _e2ee_enabled = bool(encryption_key)
     _e2ee_verified = bool(encryption_key)

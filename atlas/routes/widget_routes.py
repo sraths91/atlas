@@ -188,6 +188,10 @@ def dispatch_get(handler, path):
         from atlas.machine_comparison_widget import get_machine_comparison_widget_html
         handler.serve_html(get_machine_comparison_widget_html())
 
+    elif path == '/widget/osi-layers':
+        from atlas.osi_layers_widget import get_osi_layers_widget_html
+        handler.serve_html(get_osi_layers_widget_html())
+
     else:
         return False
 

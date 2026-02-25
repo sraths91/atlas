@@ -170,6 +170,20 @@ pytest tests/security/
 # Markers: @pytest.mark.unit, .integration, .security, .performance, .slow
 ```
 
+## Workflow: Commit After Every Change
+
+**After each feature, fix, or improvement is tested and verified, immediately commit and push to GitHub.**
+
+1. Verify the change works (restart agent, test endpoints, check HTML generation)
+2. `git add <specific files>` — only stage the files you changed
+3. `git commit -m "type: description"` — use conventional commits (feat/fix/refactor/docs)
+4. `git push origin main`
+
+Do NOT batch multiple unrelated changes into one large commit. Each logical change gets its own commit. This ensures:
+- Every working state is preserved in git history
+- Changes can be individually reverted if something breaks
+- The commit log tells a clear story of what was built and when
+
 ## LaunchDaemon Plist Templates
 
 Template variables substituted at install time:

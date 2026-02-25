@@ -1981,43 +1981,72 @@ def get_dashboard_html():
        CSS Custom Properties - Design System
        ======================================== */
     :root {{
-        /* Typography */
+        /* Typography — Fluid scaling with clamp() */
         --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-        --text-xs: 11px;
-        --text-sm: 13px;
-        --text-base: 16px;
-        --text-lg: 18px;
-        --text-xl: 22px;
-        --text-2xl: 28px;
-        --text-3xl: 32px;
+        --font-mono: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+        --text-xs: clamp(10px, 0.7vw, 11px);
+        --text-sm: clamp(12px, 0.85vw, 13px);
+        --text-base: clamp(14px, 1vw, 16px);
+        --text-lg: clamp(16px, 1.15vw, 18px);
+        --text-xl: clamp(18px, 1.4vw, 22px);
+        --text-2xl: clamp(22px, 1.8vw, 28px);
+        --text-3xl: clamp(26px, 2.2vw, 32px);
+
+        /* 8px spacing grid */
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 20px;
+        --space-6: 24px;
+        --space-7: 32px;
+        --space-8: 40px;
+        --space-9: 48px;
+        --space-10: 64px;
 
         /* Colors - Primary Palette */
-        --color-bg: #121212;
-        --color-bg-elevated: #1a1a1a;
-        --color-bg-glass: rgba(26, 26, 26, 0.7);
-        --color-text-primary: #E0E0E0;
-        --color-text-secondary: #999;
-        --color-text-tertiary: #666;
+        --color-bg: #0c0c14;
+        --color-bg-elevated: #161620;
+        --color-bg-surface: #1c1c28;
+        --color-bg-glass: rgba(22, 22, 32, 0.65);
+        --color-text-primary: #E8E8F0;
+        --color-text-secondary: #9898A8;
+        --color-text-tertiary: #5C5C6E;
 
         /* Accent Colors */
         --color-accent: #00E5A0;
         --color-accent-hover: #00C890;
-        --color-accent-dim: rgba(0, 229, 160, 0.15);
+        --color-accent-dim: rgba(0, 229, 160, 0.12);
         --color-secondary: #00C8FF;
         --color-warning: #FFB84D;
         --color-error: #FF6B6B;
         --color-success: #4ECDC4;
 
         /* Borders & Dividers */
-        --border-subtle: rgba(255, 255, 255, 0.06);
-        --border-medium: rgba(255, 255, 255, 0.1);
-        --border-accent: rgba(0, 229, 160, 0.4);
+        --border-subtle: rgba(255, 255, 255, 0.04);
+        --border-medium: rgba(255, 255, 255, 0.08);
+        --border-accent: rgba(0, 229, 160, 0.35);
+        --border-glass: rgba(255, 255, 255, 0.12);
 
-        /* Shadows */
-        --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-        --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
-        --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
-        --shadow-glow: 0 0 20px rgba(0, 229, 160, 0.2);
+        /* Shadows — layered depth system */
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+        --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45), 0 4px 8px rgba(0, 0, 0, 0.3);
+        --shadow-glow: 0 0 24px rgba(0, 229, 160, 0.15);
+        --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3),
+                       inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+        /* Glass effect tokens */
+        --glass-blur: blur(12px) saturate(160%);
+        --glass-bg: rgba(22, 22, 32, 0.65);
+        --glass-border: 1px solid var(--border-glass);
+        --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+        /* Border radii */
+        --radius-sm: 8px;
+        --radius-md: 14px;
+        --radius-lg: 20px;
+        --radius-xl: 24px;
 
         /* Transitions */
         --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -2038,7 +2067,9 @@ def get_dashboard_html():
         background: var(--color-bg);
         color: var(--color-text-primary);
         font-family: var(--font-system);
-        padding: 20px;
+        font-size: var(--text-base);
+        line-height: 1.5;
+        padding: var(--space-7);
         min-height: 100vh;
         position: relative;
         overflow-x: hidden;
@@ -2083,16 +2114,95 @@ def get_dashboard_html():
         background-clip: text;
     }}
     /* ========================================
-       Header & Navigation (Phase 1 + 3)
+       Header & Navigation
        ======================================== */
     .header-container {{
         max-width: 1600px;
-        margin: 0 auto 40px;
+        margin: 0 auto var(--space-8);
         display: flex;
         justify-content: space-between;
         align-items: center;
         position: relative;
-        gap: 24px;
+        gap: var(--space-6);
+    }}
+
+    /* E2EE Status Badge */
+    .e2ee-badge {{
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        background: var(--color-bg-surface);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-medium);
+        transition: border-color var(--transition-base);
+    }}
+    .e2ee-badge .e2ee-icon {{
+        font-size: 18px;
+    }}
+    .e2ee-badge .e2ee-label {{
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }}
+
+    /* Live Status Bar */
+    .status-bar {{
+        display: flex;
+        align-items: center;
+        gap: var(--space-6);
+        padding: var(--space-2) var(--space-5);
+        background: var(--color-bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        max-width: 1600px;
+        margin: 0 auto var(--space-6);
+        font-size: var(--text-xs);
+        color: var(--color-text-secondary);
+        overflow-x: auto;
+    }}
+    .status-bar .status-metric {{
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        white-space: nowrap;
+    }}
+    .status-bar .status-dot {{
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-success);
+        flex-shrink: 0;
+    }}
+    .status-bar .status-dot.warn {{
+        background: var(--color-warning);
+    }}
+    .status-bar .status-dot.error {{
+        background: var(--color-error);
+    }}
+    .status-bar .status-value {{
+        color: var(--color-text-primary);
+        font-weight: 600;
+        font-family: var(--font-mono);
+    }}
+    .status-bar .status-divider {{
+        width: 1px;
+        height: 16px;
+        background: var(--border-medium);
+        flex-shrink: 0;
+    }}
+
+    /* Header Branding */
+    .header-branding {{
+        text-align: center;
+    }}
+    .header-branding h1 {{
+        margin: 0;
+    }}
+    .header-subtitle {{
+        color: var(--color-text-tertiary);
+        font-size: var(--text-sm);
+        margin-top: var(--space-1);
+        letter-spacing: 0.3px;
     }}
 
     /* Glassmorphic Hamburger Menu (Phase 1) */
@@ -2267,17 +2377,16 @@ def get_dashboard_html():
         box-shadow: var(--shadow-sm);
     }}
     /* ========================================
-       Dashboard Grid (Phase 3)
+       Dashboard Grid — Bento Layout
        ======================================== */
     .dashboard {{
         display: grid;
         grid-template-columns: repeat(12, 1fr);
-        gap: 24px;
+        gap: var(--space-6);
         max-width: 1600px;
         margin: 0 auto;
     }}
 
-    /* Widget Cards with Glassmorphism (Phase 1) */
     /* Default grid column span */
     .dashboard > iframe,
     .dashboard > .widget-iframe-container {{
@@ -2288,7 +2397,7 @@ def get_dashboard_html():
         grid-column: span 4;
     }}
 
-    /* Widget span classes for precise grid control */
+    /* Bento card sizes */
     .widget-span-1 {{
         grid-column: span 4 !important;
     }}
@@ -2299,6 +2408,42 @@ def get_dashboard_html():
 
     .widget-full-width {{
         grid-column: 1 / -1 !important;
+    }}
+
+    /* Bento-style: first two widgets are wider for visual hierarchy */
+    .dashboard > iframe:first-child,
+    .dashboard > .widget-iframe-container:first-child {{
+        grid-column: span 8;
+    }}
+    .dashboard > iframe:first-child,
+    .dashboard > .widget-iframe-container:first-child {{
+        min-height: 420px;
+    }}
+
+    /* Widget card label overlay */
+    .widget-iframe-container {{
+        position: relative;
+    }}
+    .widget-iframe-container::before {{
+        content: attr(data-widget-name);
+        position: absolute;
+        top: var(--space-3);
+        left: var(--space-4);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--color-text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        z-index: 2;
+        background: var(--color-bg-surface);
+        padding: 2px 10px;
+        border-radius: var(--radius-sm);
+        opacity: 0;
+        transition: opacity var(--transition-base);
+        pointer-events: none;
+    }}
+    .widget-iframe-container:hover::before {{
+        opacity: 1;
     }}
 
     /* Widget iframe containers with loading overlays */
@@ -2316,9 +2461,9 @@ def get_dashboard_html():
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 12px;
+        gap: var(--space-3);
         background: var(--color-bg-elevated);
-        border-radius: 20px;
+        border-radius: var(--radius-lg);
         border: 1px solid var(--border-medium);
         color: var(--color-text-secondary);
         font-size: var(--text-sm);
@@ -2353,40 +2498,41 @@ def get_dashboard_html():
         width: 100%;
         height: 100%;
         border: none;
-        border-radius: 20px;
-        background: var(--color-bg-glass);
-        backdrop-filter: blur(20px) saturate(180%);
+        border-radius: var(--radius-lg);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
         border: 1px solid var(--border-medium);
-        box-shadow: var(--shadow-md),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-        transition: all var(--transition-base);
+        box-shadow: var(--shadow-card);
+        transition: transform var(--transition-base),
+                    box-shadow var(--transition-base),
+                    border-color var(--transition-base);
     }}
 
     iframe {{
         width: 100%;
-        /* Default height for iframes without inline styles */
         height: 300px;
         border: none;
-        border-radius: 20px;
-        background: var(--color-bg-glass);
-        backdrop-filter: blur(20px) saturate(180%);
+        border-radius: var(--radius-lg);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
         border: 1px solid var(--border-medium);
-        box-shadow: var(--shadow-md),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-        transition: all var(--transition-base);
+        box-shadow: var(--shadow-card);
+        transition: transform var(--transition-base),
+                    box-shadow var(--transition-base),
+                    border-color var(--transition-base);
     }}
 
     iframe:hover {{
-        transform: translateY(-4px);
+        transform: scale(1.008);
         box-shadow: var(--shadow-lg),
-                    0 12px 48px rgba(0, 229, 160, 0.12);
+                    0 8px 32px rgba(0, 229, 160, 0.08);
         border-color: var(--border-accent);
     }}
 
     .stacked-container {{
         display: flex;
         flex-direction: column;
-        gap: 24px;
+        gap: var(--space-6);
         grid-column: span 4;
     }}
 
@@ -2394,17 +2540,16 @@ def get_dashboard_html():
         width: 100%;
     }}
 
-    /* Info Cards (Phase 1) */
+    /* Info Cards */
     .info {{
-        margin: 24px auto;
+        margin: var(--space-6) auto;
         max-width: 1600px;
-        padding: 24px 28px;
-        background: var(--color-bg-glass);
-        backdrop-filter: blur(20px) saturate(180%);
+        padding: var(--space-6) var(--space-7);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
         border: 1px solid var(--border-medium);
-        border-radius: 16px;
-        box-shadow: var(--shadow-md),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-card);
     }}
 
     .info h3 {{
@@ -2426,6 +2571,35 @@ def get_dashboard_html():
         color: var(--color-secondary);
         font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
         font-size: var(--text-sm);
+    }}
+
+    /* ========================================
+       Footer
+       ======================================== */
+    .footer-summary {{
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }}
+    .footer-title {{
+        margin: 0;
+        display: inline;
+    }}
+    .footer-hint {{
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }}
+    .footer-grid {{
+        margin-top: var(--space-4);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: var(--space-4);
+    }}
+    .footer-section-title {{
+        font-size: var(--text-sm);
+        margin-bottom: var(--space-2);
     }}
 
     /* ========================================
@@ -2479,12 +2653,25 @@ def get_dashboard_html():
     /* --- Tablet (≤768px) --- */
     @media (max-width: 768px) {{
         body {{
-            padding: 12px;
+            padding: var(--space-3);
+        }}
+
+        .status-bar {{
+            gap: var(--space-3);
+            padding: var(--space-2) var(--space-3);
+            font-size: 10px;
         }}
 
         .dashboard {{
             grid-template-columns: 1fr;
-            gap: 16px;
+            gap: var(--space-4);
+        }}
+
+        /* Reset bento first-child override on tablet */
+        .dashboard > iframe:first-child,
+        .dashboard > .widget-iframe-container:first-child {{
+            grid-column: 1 / -1;
+            min-height: 350px;
         }}
 
         .dashboard > iframe,
@@ -2508,18 +2695,18 @@ def get_dashboard_html():
         /* Header: stack title center, controls at edges */
         .header-container {{
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 20px;
+            gap: var(--space-3);
+            margin-bottom: var(--space-5);
         }}
 
         h1 {{
             font-size: var(--text-2xl);
         }}
 
-        .header-container > div:first-child {{
+        .header-container > .e2ee-badge {{
             order: 2;
         }}
-        .header-container > div:nth-child(2) {{
+        .header-container > .header-branding {{
             order: 1;
             flex-basis: 100%;
             text-align: center;
@@ -2597,11 +2784,11 @@ def get_dashboard_html():
     /* --- Mobile (≤480px) --- */
     @media (max-width: 480px) {{
         body {{
-            padding: 8px;
+            padding: var(--space-2);
         }}
 
         .dashboard {{
-            gap: 10px;
+            gap: var(--space-3);
         }}
 
         .widget-iframe-container, iframe {{
@@ -2609,27 +2796,32 @@ def get_dashboard_html():
             max-height: 70vh;
         }}
 
+        /* Hide status bar on mobile */
+        .status-bar {{
+            display: none;
+        }}
+
         /* Header: compact single-line */
         .header-container {{
-            gap: 8px;
-            margin-bottom: 12px;
+            gap: var(--space-2);
+            margin-bottom: var(--space-3);
         }}
 
         h1 {{
             font-size: var(--text-xl);
-            margin-bottom: 4px;
+            margin-bottom: var(--space-1);
         }}
 
         /* Hide subtitle on mobile */
-        .header-container > div:nth-child(2) > p {{
+        .header-subtitle {{
             display: none;
         }}
 
         /* E2EE status: icon only */
-        #e2eeStatus {{
-            padding: 6px 8px !important;
+        .e2ee-badge {{
+            padding: var(--space-1) var(--space-2) !important;
         }}
-        #e2eeText {{
+        .e2ee-label {{
             display: none !important;
         }}
 
@@ -2648,10 +2840,10 @@ def get_dashboard_html():
             right: 0;
             bottom: 0;
             border-radius: 0;
-            padding: 60px 16px 16px;
+            padding: 60px var(--space-4) var(--space-4);
             overflow-y: auto;
             z-index: 2000;
-            background: rgba(18, 18, 18, 0.98);
+            background: rgba(12, 12, 20, 0.98);
             backdrop-filter: blur(40px);
         }}
 
@@ -2743,10 +2935,10 @@ def get_dashboard_html():
     /* --- Small Phones (≤360px) --- */
     @media (max-width: 360px) {{
         body {{
-            padding: 6px;
+            padding: var(--space-1);
         }}
         .dashboard {{
-            gap: 8px;
+            gap: var(--space-2);
         }}
         h1 {{
             font-size: var(--text-lg);
@@ -3491,13 +3683,13 @@ def get_dashboard_html():
 
 <main id="main-content">
 <div class="header-container">
-    <div id="e2eeStatus" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333;">
-        <span id="e2eeIcon" style="font-size: 18px;"></span>
-        <span id="e2eeText" style="font-size: 12px; color: #666;">Checking...</span>
+    <div id="e2eeStatus" class="e2ee-badge">
+        <span id="e2eeIcon" class="e2ee-icon"></span>
+        <span id="e2eeText" class="e2ee-label">Checking...</span>
     </div>
-    <div style="text-align: center;">
-        <h1 style="margin: 0;">Live Widget Dashboard</h1>
-        <p style="color: #999; margin: 5px 0 0 0;">Real-time HTML/CSS/JavaScript widgets - No images!</p>
+    <div class="header-branding">
+        <h1>ATLAS Dashboard</h1>
+        <p class="header-subtitle">Fleet Monitoring &amp; Network Intelligence</p>
     </div>
     <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Open menu" aria-expanded="false" aria-controls="menu">
         <span></span>
@@ -3604,6 +3796,34 @@ def get_dashboard_html():
     </div>
 </div>
 
+<div class="status-bar" id="statusBar" role="status" aria-label="System metrics">
+    <div class="status-metric">
+        <span class="status-dot" id="statusDot"></span>
+        <span>Agent</span>
+        <span class="status-value" id="statusUptime">--</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>CPU</span>
+        <span class="status-value" id="statusCpu">--%</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Memory</span>
+        <span class="status-value" id="statusMem">--%</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Network</span>
+        <span class="status-value" id="statusNet">-- Mbps</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Widgets</span>
+        <span class="status-value" id="statusWidgets">0</span>
+    </div>
+</div>
+
 <div id="offlineBanner" class="offline-banner" role="alert" aria-live="assertive" style="display: none;">
     <span>&#9888;</span>
     <span>Connection to agent lost. Attempting to reconnect...</span>
@@ -3614,21 +3834,21 @@ def get_dashboard_html():
 {_generate_widget_iframes()}
 </div>
 
-<footer class="info" role="contentinfo">
+<footer class="info footer-urls" role="contentinfo">
     <details>
-        <summary style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;">
-            <h3 style="margin: 0; display: inline;">Widget URLs</h3>
-            <span style="font-size: var(--text-xs); color: var(--color-text-tertiary);">Click to expand</span>
+        <summary class="footer-summary">
+            <h3 class="footer-title">Widget URLs</h3>
+            <span class="footer-hint">Click to expand</span>
         </summary>
-        <div style="margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+        <div class="footer-grid">
             <div>
-                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">System</h3>
+                <h3 class="footer-section-title">System</h3>
                 <p><code>/widget/system-monitor</code></p>
                 <p><code>/widget/processes</code></p>
                 <p><code>/widget/system-health</code></p>
             </div>
             <div>
-                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Network</h3>
+                <h3 class="footer-section-title">Network</h3>
                 <p><code>/widget/wifi</code></p>
                 <p><code>/widget/wifi-analyzer</code></p>
                 <p><code>/widget/speedtest</code></p>
@@ -3636,14 +3856,14 @@ def get_dashboard_html():
                 <p><code>/widget/network-analysis</code></p>
             </div>
             <div>
-                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Enterprise</h3>
+                <h3 class="footer-section-title">Enterprise</h3>
                 <p><code>/widget/voip-quality</code></p>
                 <p><code>/widget/connection-rate</code></p>
                 <p><code>/widget/throughput</code></p>
                 <p><code>/widget/osi-layers</code></p>
             </div>
             <div>
-                <h3 style="font-size: var(--text-sm); margin-bottom: 8px;">Services & Hardware</h3>
+                <h3 class="footer-section-title">Services &amp; Hardware</h3>
                 <p><code>/widget/vpn-status</code></p>
                 <p><code>/widget/saas-health</code></p>
                 <p><code>/widget/network-quality</code></p>
@@ -3658,6 +3878,58 @@ def get_dashboard_html():
 </footer>
 
 <script>
+    // Live Status Bar Updates
+    async function updateStatusBar() {{
+        try {{
+            const resp = await fetch('/api/agent/health');
+            const data = await resp.json();
+            const dot = document.getElementById('statusDot');
+            const uptime = document.getElementById('statusUptime');
+            const cpu = document.getElementById('statusCpu');
+            const mem = document.getElementById('statusMem');
+            const net = document.getElementById('statusNet');
+            const widgets = document.getElementById('statusWidgets');
+
+            // Agent status dot
+            dot.className = 'status-dot';
+            if (data.status === 'ok' || data.status === 'healthy') {{
+                dot.classList.add(''); // green default
+            }} else {{
+                dot.classList.add('warn');
+            }}
+
+            // Uptime
+            if (data.uptime_seconds) {{
+                const hrs = Math.floor(data.uptime_seconds / 3600);
+                const mins = Math.floor((data.uptime_seconds % 3600) / 60);
+                uptime.textContent = hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm';
+            }} else {{
+                uptime.textContent = 'Online';
+            }}
+
+            // CPU & Memory (from system data)
+            if (data.cpu_percent !== undefined) {{
+                cpu.textContent = data.cpu_percent.toFixed(0) + '%';
+            }}
+            if (data.memory_percent !== undefined) {{
+                mem.textContent = data.memory_percent.toFixed(0) + '%';
+            }}
+
+            // Network (if available)
+            if (data.network_mbps !== undefined) {{
+                net.textContent = data.network_mbps.toFixed(1) + ' Mbps';
+            }}
+
+            // Widget count
+            widgets.textContent = document.querySelectorAll('.dashboard iframe').length;
+        }} catch (e) {{
+            document.getElementById('statusDot').className = 'status-dot error';
+            document.getElementById('statusUptime').textContent = 'Offline';
+        }}
+    }}
+    updateStatusBar();
+    setInterval(updateStatusBar, 10000);
+
     // E2EE Status Update
     async function updateE2EEStatus() {{
         try {{
@@ -3671,16 +3943,16 @@ def get_dashboard_html():
             
             if (e2ee.status === 'encrypted') {{
                 icon.textContent = '';
-                text.innerHTML = '<span style="color: #00E5A0;">E2EE Active</span><br><small style="color: #666;">Server verified ✓</small>';
-                container.style.borderColor = '#00E5A0';
+                text.innerHTML = '<span style="color: var(--color-accent);">E2EE Active</span><br><small style="color: var(--color-text-tertiary);">Server verified</small>';
+                container.style.borderColor = 'var(--color-accent)';
             }} else if (e2ee.status === 'enabled_unverified') {{
                 icon.textContent = '';
-                text.innerHTML = '<span style="color: #ffd93d;">E2EE Enabled</span><br><small style="color: #666;">Awaiting verification...</small>';
-                container.style.borderColor = '#ffd93d';
+                text.innerHTML = '<span style="color: var(--color-warning);">E2EE Enabled</span><br><small style="color: var(--color-text-tertiary);">Awaiting verification</small>';
+                container.style.borderColor = 'var(--color-warning)';
             }} else {{
-                icon.textContent = '🔓';
-                text.innerHTML = '<span style="color: #ff6666;">Not Encrypted</span><br><small style="color: #666;">Data sent in plaintext</small>';
-                container.style.borderColor = '#ff6666';
+                icon.textContent = '';
+                text.innerHTML = '<span style="color: var(--color-error);">Not Encrypted</span><br><small style="color: var(--color-text-tertiary);">Plaintext</small>';
+                container.style.borderColor = 'var(--color-error)';
             }}
         }} catch (e) {{
             console.error('Error updating E2EE status:', e);
@@ -3718,51 +3990,67 @@ def get_dashboard_html():
     function changeTheme(theme) {{
         const themes = {{
             'default': {{
-                primary: '#00E5A0',
-                secondary: '#00C890',
-                background: '#0a0a0a'
+                accent: '#00E5A0',
+                accentHover: '#00C890',
+                bg: '#0c0c14',
+                bgElevated: '#161620',
+                secondary: '#00C8FF'
             }},
             'cyberpunk': {{
-                primary: '#ff00ff',
-                secondary: '#00ffff',
-                background: '#0a0a0a'
+                accent: '#ff00ff',
+                accentHover: '#cc00cc',
+                bg: '#0a0a14',
+                bgElevated: '#14141e',
+                secondary: '#00ffff'
             }},
             'ocean': {{
-                primary: '#0080ff',
-                secondary: '#00ffff',
-                background: '#001a33'
+                accent: '#0080ff',
+                accentHover: '#0060cc',
+                bg: '#060c18',
+                bgElevated: '#0c1428',
+                secondary: '#00ffff'
             }},
             'sunset': {{
-                primary: '#ff6400',
-                secondary: '#ff0080',
-                background: '#1a0a00'
+                accent: '#ff6400',
+                accentHover: '#e05800',
+                bg: '#140a06',
+                bgElevated: '#1e120a',
+                secondary: '#ff0080'
             }},
             'forest': {{
-                primary: '#00ff64',
-                secondary: '#008040',
-                background: '#0a1a0a'
+                accent: '#00ff64',
+                accentHover: '#00cc50',
+                bg: '#060e06',
+                bgElevated: '#0c180c',
+                secondary: '#008040'
             }},
             'monochrome': {{
-                primary: '#ffffff',
-                secondary: '#666666',
-                background: '#080808'
+                accent: '#e0e0e0',
+                accentHover: '#c0c0c0',
+                bg: '#0a0a0a',
+                bgElevated: '#141414',
+                secondary: '#888888'
             }}
         }};
-        
-        const selectedTheme = themes[theme];
-        if (selectedTheme) {{
-            document.body.style.background = selectedTheme.background;
-            document.querySelector('h1').style.color = selectedTheme.primary;
-            
+
+        const t = themes[theme];
+        if (t) {{
+            const r = document.documentElement.style;
+            r.setProperty('--color-accent', t.accent);
+            r.setProperty('--color-accent-hover', t.accentHover);
+            r.setProperty('--color-bg', t.bg);
+            r.setProperty('--color-bg-elevated', t.bgElevated);
+            r.setProperty('--color-secondary', t.secondary);
+            r.setProperty('--color-accent-dim', t.accent + '1f');
+            r.setProperty('--border-accent', t.accent + '59');
+
             // Update menu items
             document.querySelectorAll('.menu-item').forEach(item => {{
                 item.classList.remove('active');
             }});
             event.target.closest('.menu-item').classList.add('active');
-            
-            // Store theme preference
+
             localStorage.setItem('dashboardTheme', theme);
-            
             toggleMenu();
         }}
     }}
@@ -4023,6 +4311,32 @@ def get_dashboard_html():
         }}
     }});
     
+    // Restore saved theme on load
+    (function restoreTheme() {{
+        const saved = localStorage.getItem('dashboardTheme');
+        if (saved && saved !== 'default') {{
+            // Simulate theme change without toggleMenu
+            const themes = {{
+                'cyberpunk': {{ accent: '#ff00ff', accentHover: '#cc00cc', bg: '#0a0a14', bgElevated: '#14141e', secondary: '#00ffff' }},
+                'ocean': {{ accent: '#0080ff', accentHover: '#0060cc', bg: '#060c18', bgElevated: '#0c1428', secondary: '#00ffff' }},
+                'sunset': {{ accent: '#ff6400', accentHover: '#e05800', bg: '#140a06', bgElevated: '#1e120a', secondary: '#ff0080' }},
+                'forest': {{ accent: '#00ff64', accentHover: '#00cc50', bg: '#060e06', bgElevated: '#0c180c', secondary: '#008040' }},
+                'monochrome': {{ accent: '#e0e0e0', accentHover: '#c0c0c0', bg: '#0a0a0a', bgElevated: '#141414', secondary: '#888888' }}
+            }};
+            const t = themes[saved];
+            if (t) {{
+                const r = document.documentElement.style;
+                r.setProperty('--color-accent', t.accent);
+                r.setProperty('--color-accent-hover', t.accentHover);
+                r.setProperty('--color-bg', t.bg);
+                r.setProperty('--color-bg-elevated', t.bgElevated);
+                r.setProperty('--color-secondary', t.secondary);
+                r.setProperty('--color-accent-dim', t.accent + '1f');
+                r.setProperty('--border-accent', t.accent + '59');
+            }}
+        }}
+    }})();
+
     // ========================================
     // Widget Settings Panel
     // ========================================

@@ -5,15 +5,40 @@ Enterprise macOS fleet monitoring platform with real-time dashboards, network an
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip3 install --user psutil requests cryptography bcrypt rumps PyJWT
+# Install dependencies (use python3.12 — python3 may be 3.14 which lacks psutil)
+pip3.12 install --user psutil requests cryptography bcrypt rumps PyJWT
 
-# Start agent dashboard (port 8767)
-python3 start_atlas_agent.py --no-menubar --port 8767
-
-# Start fleet server (port 8778)
+# Start fleet server first (port 8768, HTTPS)
 bash start_fleet_server.sh
+
+# Start agent dashboard with fleet connection + E2EE (port 8767)
+python3.12 start_atlas_agent.py --no-menubar --port 8767 \
+  --fleet-server https://localhost:8768 \
+  --api-key sQ2X6577YL24Ev0lQFQoAwsiKD73SLcQ_VbG0ZUpbWU \
+  --encryption-key <base64-key>
+
+# Generate a new E2EE encryption key
+python3.12 -c "from atlas.encryption import generate_encryption_key; generate_encryption_key()"
+
+# Standalone mode (no fleet, no E2EE)
+python3.12 start_atlas_agent.py --no-menubar --port 8767
 ```
+
+### Agent Startup Flags
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--port` | Yes | HTTP port (default 8767) |
+| `--no-menubar` | No | Skip macOS menu bar (use for headless/CLI) |
+| `--fleet-server` | For fleet | Fleet server URL (e.g., `https://localhost:8768`) |
+| `--api-key` | For fleet | API key registered with fleet server |
+| `--encryption-key` | For E2EE | Base64 AES-256-GCM key (shared with server) |
+| `--machine-id` | No | Override machine ID (defaults to hostname) |
+| `--standalone` | No | Force standalone mode (ignores fleet flags) |
+
+**CRITICAL**: Without `--fleet-server`, `--api-key`, AND `--encryption-key`, the dashboard
+will show E2EE as disabled and fleet_server as null. All three flags are needed for full
+fleet connectivity with end-to-end encryption.
 
 ## Architecture
 
@@ -183,6 +208,35 @@ Do NOT batch multiple unrelated changes into one large commit. Each logical chan
 - Every working state is preserved in git history
 - Changes can be individually reverted if something breaks
 - The commit log tells a clear story of what was built and when
+
+## Design System (CSS Custom Properties)
+
+Both `get_homepage_html()` and `get_dashboard_html()` in `atlas/page_generators.py` share
+the same design system via CSS `:root` custom properties:
+
+- **Typography**: Fluid `clamp()` scaling (`--text-xs` through `--text-4xl`)
+- **Spacing**: 8px grid (`--space-1` through `--space-10`)
+- **Colors**: Deep purplish-dark palette (`--color-bg: #0c0c14`, `--color-bg-elevated: #161620`)
+- **Glass effects**: `--glass-blur: blur(12px) saturate(160%)`, `--glass-bg: rgba(22,22,32,0.65)`
+- **Shadows**: Layered system (`--shadow-sm/md/lg/card/glow`)
+- **Borders**: `--border-subtle/medium/accent/glass`
+- **Radii**: `--radius-sm/md/lg/xl` (8/14/20/24px)
+- **Transitions**: `--transition-fast/base/slow` with cubic-bezier easing
+
+### Key Visual Features
+- Ambient mesh gradient background (3 radial gradients with float animation)
+- Glassmorphic widget cards with `backdrop-filter` and subtle `scale(1.008)` hover
+- Bento-style grid: first widget spans 8 columns for visual hierarchy
+- Live status bar (CPU, memory, network, uptime) polling `/api/agent/health` every 10s
+- Widget name label overlay on hover (uses `data-widget-name` attribute)
+- Theme system: 6 themes stored in localStorage, applied via `setProperty()` on `:root`
+
+### When Modifying page_generators.py
+- Use CSS custom properties (`var(--color-accent)`) — never hardcode colors
+- Both `get_homepage_html()` (non-f-string) and `get_dashboard_html()` (f-string) exist
+- In f-strings, CSS braces must be doubled: `{{ }}` instead of `{ }`
+- Test HTML generation: `python3.12 -c "from atlas.page_generators import get_homepage_html; print(len(get_homepage_html()))"`
+- After changes: restart agent, hard refresh (Cmd+Shift+R), verify at both `/` and `/dashboard`
 
 ## LaunchDaemon Plist Templates
 

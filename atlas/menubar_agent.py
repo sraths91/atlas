@@ -454,10 +454,16 @@ class AtlasMenuBarApp(rumps.App):
                 cmd += ['--fleet-server', config['fleet_server']]
             if config.get('machine_id'):
                 cmd += ['--machine-id', config['machine_id']]
-            if config.get('api_key'):
-                cmd += ['--api-key', config['api_key']]
-            if config.get('encryption_key'):
-                cmd += ['--encryption-key', config['encryption_key']]
+            # Read secrets from environment (not from config file)
+            api_key_env = config.get('api_key_env', 'ATLAS_API_KEY')
+            api_key = os.environ.get(api_key_env) or config.get('api_key', '')
+            if api_key:
+                cmd += ['--api-key', api_key]
+
+            enc_key_env = config.get('encryption_key_env', 'ATLAS_ENCRYPTION_KEY')
+            enc_key = os.environ.get(enc_key_env) or config.get('encryption_key', '')
+            if enc_key:
+                cmd += ['--encryption-key', enc_key]
 
             # Launch agent as detached subprocess
             subprocess.Popen(

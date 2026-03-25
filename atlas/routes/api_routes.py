@@ -17,48 +17,7 @@ from atlas.dashboard_preferences import (
     get_dashboard_preferences, CATEGORIES
 )
 
-# Optional Phase 4 monitors
-try:
-    from atlas.display_monitor import get_display_monitor
-    DISPLAY_MONITOR_AVAILABLE = True
-except ImportError:
-    DISPLAY_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.power_monitor import get_power_monitor
-    POWER_MONITOR_AVAILABLE = True
-except ImportError:
-    POWER_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.peripheral_monitor import get_peripheral_monitor
-    PERIPHERAL_MONITOR_AVAILABLE = True
-except ImportError:
-    PERIPHERAL_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.security_monitor import get_security_monitor
-    SECURITY_MONITOR_AVAILABLE = True
-except ImportError:
-    SECURITY_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.disk_health_monitor import get_disk_monitor
-    DISK_MONITOR_AVAILABLE = True
-except ImportError:
-    DISK_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.software_inventory_monitor import get_software_monitor
-    SOFTWARE_MONITOR_AVAILABLE = True
-except ImportError:
-    SOFTWARE_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.application_monitor import get_app_monitor
-    APP_MONITOR_AVAILABLE = True
-except ImportError:
-    APP_MONITOR_AVAILABLE = False
+from atlas.monitors_registry import get_monitor, is_available
 
 logger = logging.getLogger(__name__)
 
@@ -184,58 +143,58 @@ def dispatch_get(handler, path):
     # ==================== Hardware Monitors ====================
 
     elif path == '/api/display/status':
-        if DISPLAY_MONITOR_AVAILABLE:
-            monitor = get_display_monitor()
+        monitor = get_monitor('display')
+        if monitor:
             handler.serve_json(monitor.get_status())
         else:
             handler.serve_json({'error': 'Display monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/power/status':
-        if POWER_MONITOR_AVAILABLE:
-            monitor = get_power_monitor()
+        monitor = get_monitor('power')
+        if monitor:
             handler.serve_json(monitor.get_power_summary())
         else:
             handler.serve_json({'error': 'Power monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/peripherals/devices':
-        if PERIPHERAL_MONITOR_AVAILABLE:
-            monitor = get_peripheral_monitor()
+        monitor = get_monitor('peripheral')
+        if monitor:
             handler.serve_json(monitor.get_connected_devices('all'))
         else:
             handler.serve_json({'error': 'Peripheral monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/security/status':
-        if SECURITY_MONITOR_AVAILABLE:
-            monitor = get_security_monitor()
+        monitor = get_monitor('security')
+        if monitor:
             handler.serve_json(monitor.get_current_security_status())
         else:
             handler.serve_json({'error': 'Security monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/disk/health':
-        if DISK_MONITOR_AVAILABLE:
-            monitor = get_disk_monitor()
+        monitor = get_monitor('disk')
+        if monitor:
             handler.serve_json(monitor.get_disk_health_summary())
         else:
             handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/disk/status':
-        if DISK_MONITOR_AVAILABLE:
-            monitor = get_disk_monitor()
+        monitor = get_monitor('disk')
+        if monitor:
             result = monitor.get_detailed_disk_status()
             handler.serve_json(result)
         else:
             handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/software/inventory':
-        if SOFTWARE_MONITOR_AVAILABLE:
-            monitor = get_software_monitor()
+        monitor = get_monitor('software')
+        if monitor:
             handler.serve_json(monitor.get_inventory_summary())
         else:
             handler.serve_json({'error': 'Software monitor not available', 'status': 'unavailable'})
 
     elif path == '/api/applications/status':
-        if APP_MONITOR_AVAILABLE:
-            monitor = get_app_monitor()
+        monitor = get_monitor('application')
+        if monitor:
             handler.serve_json(monitor.get_crash_summary())
         else:
             handler.serve_json({'error': 'Application monitor not available', 'status': 'unavailable'})
@@ -1206,9 +1165,9 @@ def _handle_system_health_overview(handler):
         'monitors': {}
     }
 
-    if DISPLAY_MONITOR_AVAILABLE:
+    dm = get_monitor('display')
+    if dm:
         try:
-            dm = get_display_monitor()
             status = dm.get_status()
             overview['monitors']['display'] = {
                 'status': status.get('status', 'unknown'),
@@ -1218,9 +1177,9 @@ def _handle_system_health_overview(handler):
         except Exception as e:
             overview['monitors']['display'] = {'status': 'error', 'error': str(e)}
 
-    if POWER_MONITOR_AVAILABLE:
+    pm = get_monitor('power')
+    if pm:
         try:
-            pm = get_power_monitor()
             summary = pm.get_power_summary()
             overview['monitors']['power'] = {
                 'status': 'healthy' if summary.get('battery', {}).get('health_percentage', 0) > 50 else 'warning',
@@ -1231,9 +1190,9 @@ def _handle_system_health_overview(handler):
         except Exception as e:
             overview['monitors']['power'] = {'status': 'error', 'error': str(e)}
 
-    if PERIPHERAL_MONITOR_AVAILABLE:
+    perm = get_monitor('peripheral')
+    if perm:
         try:
-            perm = get_peripheral_monitor()
             summary = perm.get_peripheral_summary()
             overview['monitors']['peripherals'] = {
                 'status': 'healthy',
@@ -1243,9 +1202,9 @@ def _handle_system_health_overview(handler):
         except Exception as e:
             overview['monitors']['peripherals'] = {'status': 'error', 'error': str(e)}
 
-    if SECURITY_MONITOR_AVAILABLE:
+    sm = get_monitor('security')
+    if sm:
         try:
-            sm = get_security_monitor()
             summary = sm.get_current_security_status()
             score = summary.get('security_score', 0)
             overview['monitors']['security'] = {
@@ -1257,10 +1216,10 @@ def _handle_system_health_overview(handler):
         except Exception as e:
             overview['monitors']['security'] = {'status': 'error', 'error': str(e)}
 
-    if DISK_MONITOR_AVAILABLE:
+    disk_mon = get_monitor('disk')
+    if disk_mon:
         try:
-            dm = get_disk_monitor()
-            summary = dm.get_disk_health_summary()
+            summary = disk_mon.get_disk_health_summary()
             overview['monitors']['disk'] = {
                 'status': summary.get('overall_status', 'unknown'),
                 'disk_count': len(summary.get('disks', [])),

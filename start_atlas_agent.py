@@ -135,7 +135,9 @@ def main():
         print(f"   Machine ID: {args.machine_id}")
     print("=" * 60)
 
-    # Save startup config so the menubar can restart the agent if needed
+    # Save startup config so the menubar can restart the agent if needed.
+    # SECURITY: Never store secrets (api_key, encryption_key) in plaintext on disk.
+    # Instead, store env var names so the menubar reads secrets from the environment.
     import json
     config_dir = os.path.expanduser('~/.atlas')
     os.makedirs(config_dir, exist_ok=True)
@@ -143,14 +145,22 @@ def main():
         'port': args.port,
         'fleet_server': args.fleet_server,
         'machine_id': args.machine_id,
-        'api_key': args.api_key,
-        'encryption_key': args.encryption_key,
         'project_dir': os.path.dirname(os.path.abspath(__file__)),
         'python_path': sys.executable,
     }
-    with open(os.path.join(config_dir, 'agent-startup.json'), 'w') as f:
+    # Store env var names for secrets (menubar will read from env at restart)
+    if args.api_key:
+        os.environ.setdefault('ATLAS_API_KEY', args.api_key)
+        startup_config['api_key_env'] = 'ATLAS_API_KEY'
+    if args.encryption_key:
+        os.environ.setdefault('ATLAS_ENCRYPTION_KEY', args.encryption_key)
+        startup_config['encryption_key_env'] = 'ATLAS_ENCRYPTION_KEY'
+
+    config_path = os.path.join(config_dir, 'agent-startup.json')
+    with open(config_path, 'w') as f:
         json.dump(startup_config, f, indent=2)
-    logger.info(f"Saved startup config to {config_dir}/agent-startup.json")
+    os.chmod(config_path, 0o600)  # Owner-only read/write
+    logger.info(f"Saved startup config to {config_path} (secrets stored via env vars)")
 
     # Start agent server in background thread
     def start_agent():

@@ -24,48 +24,7 @@ from atlas.routes.api_routes import (
     dispatch_post as _dispatch_api_post,
 )
 
-# Import Phase 4 monitors (optional)
-try:
-    from atlas.display_monitor import get_display_monitor
-    DISPLAY_MONITOR_AVAILABLE = True
-except ImportError:
-    DISPLAY_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.power_monitor import get_power_monitor
-    POWER_MONITOR_AVAILABLE = True
-except ImportError:
-    POWER_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.peripheral_monitor import get_peripheral_monitor
-    PERIPHERAL_MONITOR_AVAILABLE = True
-except ImportError:
-    PERIPHERAL_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.security_monitor import get_security_monitor
-    SECURITY_MONITOR_AVAILABLE = True
-except ImportError:
-    SECURITY_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.disk_health_monitor import get_disk_monitor
-    DISK_MONITOR_AVAILABLE = True
-except ImportError:
-    DISK_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.software_inventory_monitor import get_software_monitor
-    SOFTWARE_MONITOR_AVAILABLE = True
-except ImportError:
-    SOFTWARE_MONITOR_AVAILABLE = False
-
-try:
-    from atlas.application_monitor import get_app_monitor
-    APP_MONITOR_AVAILABLE = True
-except ImportError:
-    APP_MONITOR_AVAILABLE = False
+from atlas.monitors_registry import get_monitor, is_available
 
 logger = logging.getLogger(__name__)
 
@@ -262,8 +221,8 @@ class LiveWidgetHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
         except Exception as e:
-            logger.error(f"Error serving live widget: {e}", exc_info=True)
-            self.send_error(500, str(e))
+            logger.error(f"Error serving {path}: {e}", exc_info=True)
+            self.send_error(500, "Internal server error")
 
     def _handle_login_get(self):
         """Serve login page."""
@@ -742,58 +701,19 @@ def start_live_widget_server(port=8767, system_monitor=None, fleet_server=None, 
     except Exception as e:
         logger.error(f"Failed to start WiFi roaming tracker: {e}")
 
-    # Start Phase 4 monitors
-    if POWER_MONITOR_AVAILABLE:
-        try:
-            power_monitor = get_power_monitor()
-            power_monitor.start()
-            logger.info("Power monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start power monitor: {e}")
+    # Start Phase 4 monitors via centralized registry
+    for name in ('power', 'peripheral', 'security', 'disk', 'software', 'application'):
+        monitor = get_monitor(name)
+        if monitor and hasattr(monitor, 'start'):
+            try:
+                monitor.start()
+                logger.info(f"{name.capitalize()} monitor started")
+            except Exception as e:
+                logger.error(f"Failed to start {name} monitor: {e}")
 
-    # Note: Display monitor collects data on-demand and doesn't need to be started
-    if DISPLAY_MONITOR_AVAILABLE:
+    # Display monitor collects data on-demand and doesn't need to be started
+    if is_available('display'):
         logger.info("Display monitor available (on-demand collection)")
-
-    if PERIPHERAL_MONITOR_AVAILABLE:
-        try:
-            peripheral_monitor = get_peripheral_monitor()
-            peripheral_monitor.start()
-            logger.info("Peripheral monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start peripheral monitor: {e}")
-
-    if SECURITY_MONITOR_AVAILABLE:
-        try:
-            security_monitor = get_security_monitor()
-            security_monitor.start()
-            logger.info("Security monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start security monitor: {e}")
-
-    if DISK_MONITOR_AVAILABLE:
-        try:
-            disk_monitor = get_disk_monitor()
-            disk_monitor.start()
-            logger.info("Disk health monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start disk monitor: {e}")
-
-    if SOFTWARE_MONITOR_AVAILABLE:
-        try:
-            software_monitor = get_software_monitor()
-            software_monitor.start()
-            logger.info("Software inventory monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start software monitor: {e}")
-
-    if APP_MONITOR_AVAILABLE:
-        try:
-            app_monitor = get_app_monitor()
-            app_monitor.start()
-            logger.info("Application monitor started")
-        except Exception as e:
-            logger.error(f"Failed to start application monitor: {e}")
 
     try:
         from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor

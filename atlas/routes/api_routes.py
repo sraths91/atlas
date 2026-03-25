@@ -1,7 +1,6 @@
-"""
-API routes for the agent dashboard.
+"""API routes for the agent dashboard.
 
-Handles all GET /api/* and POST /api/* routes.
+Handles all GET /api/* and POST /api/* routes via AgentRouter.
 """
 import json
 import time
@@ -18,6 +17,7 @@ from atlas.dashboard_preferences import (
 )
 
 from atlas.monitors_registry import get_monitor, is_available
+from atlas.routes.agent_router import agent_router
 
 logger = logging.getLogger(__name__)
 
@@ -34,1125 +34,1318 @@ def _get_ping_monitor():
     return _get_ping_monitor._instance
 
 
-def dispatch_get(handler, path):
-    """Handle GET requests for API data endpoints.
+# ==================== Dashboard Routes ====================
 
-    Args:
-        handler: LiveWidgetHandler instance
-        path: URL path (without query string)
+@agent_router.route('GET', '/api/dashboard/layout')
+def handle_dashboard_layout_get(handler):
+    prefs = get_dashboard_preferences()
+    handler.serve_json({
+        'layout': prefs.get_layout(),
+        'widgets': prefs.get_all_widgets_with_state(),
+        'categories': CATEGORIES,
+    })
 
-    Returns:
-        True if the request was handled, False otherwise
-    """
-    # ==================== Dashboard Layout ====================
 
-    if path == '/api/dashboard/layout':
-        prefs = get_dashboard_preferences()
-        handler.serve_json({
-            'layout': prefs.get_layout(),
-            'widgets': prefs.get_all_widgets_with_state(),
-            'categories': CATEGORIES,
-        })
+@agent_router.route('GET', '/api/dashboard/widgets')
+def handle_dashboard_widgets(handler):
+    prefs = get_dashboard_preferences()
+    handler.serve_json({
+        'widgets': prefs.get_all_widgets_with_state(),
+        'categories': CATEGORIES,
+    })
 
-    elif path == '/api/dashboard/widgets':
-        prefs = get_dashboard_preferences()
-        handler.serve_json({
-            'widgets': prefs.get_all_widgets_with_state(),
-            'categories': CATEGORIES,
-        })
 
-    # ==================== System Metrics ====================
+# ==================== System Metrics ====================
 
-    elif path == '/api/system/comprehensive':
-        handler.serve_json(get_comprehensive_system_stats())
+@agent_router.route('GET', '/api/system/comprehensive')
+def handle_system_comprehensive(handler):
+    handler.serve_json(get_comprehensive_system_stats())
 
-    elif path == '/api/metrics/aggregated':
-        from atlas.database import get_database
-        from urllib.parse import urlparse, parse_qs
 
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        interval = safe_int_param(params, 'interval', 5, max_val=1440)
+@agent_router.route('GET', '/api/metrics/aggregated')
+def handle_metrics_aggregated(handler):
+    from atlas.database import get_database
+    from urllib.parse import urlparse, parse_qs
 
-        db = get_database()
-        data = db.get_aggregated_metrics(hours=hours, interval_minutes=interval)
-        handler.serve_json(data)
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    interval = safe_int_param(params, 'interval', 5, max_val=1440)
 
-    elif path == '/api/metrics/history':
-        from atlas.database import get_database
-        from urllib.parse import urlparse, parse_qs
+    db = get_database()
+    data = db.get_aggregated_metrics(hours=hours, interval_minutes=interval)
+    handler.serve_json(data)
 
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        limit = safe_int_param(params, 'limit', 1000, max_val=10000)
 
-        db = get_database()
-        metrics = db.get_metrics(hours=hours, limit=limit)
-        handler.serve_json({'metrics': metrics, 'count': len(metrics)})
+@agent_router.route('GET', '/api/metrics/history')
+def handle_metrics_history(handler):
+    from atlas.database import get_database
+    from urllib.parse import urlparse, parse_qs
 
-    # ==================== Pressure ====================
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    limit = safe_int_param(params, 'limit', 1000, max_val=10000)
 
-    elif path == '/api/pressure/history/10m':
-        handler.serve_json(get_pressure_logger().get_history('10m'))
+    db = get_database()
+    metrics = db.get_metrics(hours=hours, limit=limit)
+    handler.serve_json({'metrics': metrics, 'count': len(metrics)})
 
-    elif path == '/api/pressure/history/1h':
-        handler.serve_json(get_pressure_logger().get_history('1h'))
 
-    elif path == '/api/pressure/history/24h':
-        handler.serve_json(get_pressure_logger().get_history('24h'))
+# ==================== Pressure ====================
 
-    elif path == '/api/pressure/history/7d':
-        handler.serve_json(get_pressure_logger().get_history('7d'))
+@agent_router.route('GET', '/api/pressure/history/10m')
+def handle_pressure_history_10m(handler):
+    handler.serve_json(get_pressure_logger().get_history('10m'))
 
-    elif path == '/api/pressure/current':
-        handler.serve_json(get_pressure_logger().get_current())
 
-    # ==================== WebSocket ====================
+@agent_router.route('GET', '/api/pressure/history/1h')
+def handle_pressure_history_1h(handler):
+    handler.serve_json(get_pressure_logger().get_history('1h'))
 
-    elif path == '/api/stream':
-        handler.handle_websocket()
 
-    # ==================== System Stats ====================
+@agent_router.route('GET', '/api/pressure/history/24h')
+def handle_pressure_history_24h(handler):
+    handler.serve_json(get_pressure_logger().get_history('24h'))
 
-    elif path == '/api/stats':
-        handler.serve_json(handler.get_current_stats())
 
-    elif path == '/api/health':
-        handler.serve_json(get_system_health())
+@agent_router.route('GET', '/api/pressure/history/7d')
+def handle_pressure_history_7d(handler):
+    handler.serve_json(get_pressure_logger().get_history('7d'))
 
-    # ==================== Speed Test ====================
 
-    elif path == '/api/speedtest':
-        monitor = _get_speed_test_monitor()
-        handler.serve_json(monitor.get_last_result())
+@agent_router.route('GET', '/api/pressure/current')
+def handle_pressure_current(handler):
+    handler.serve_json(get_pressure_logger().get_current())
 
-    elif path == '/api/speedtest/history':
-        monitor = _get_speed_test_monitor()
-        handler.serve_json(monitor.get_history())
 
-    elif path == '/api/speedtest/slow-status':
-        monitor = _get_speed_test_monitor()
-        handler.serve_json(monitor.get_slow_speed_status())
+# ==================== WebSocket ====================
 
-    elif path == '/api/speedtest/mode':
-        monitor = _get_speed_test_monitor()
-        handler.serve_json(monitor.get_mode_info())
+@agent_router.route('GET', '/api/stream')
+def handle_stream(handler):
+    handler.handle_websocket()
 
-    # ==================== Hardware Monitors ====================
 
-    elif path == '/api/display/status':
-        monitor = get_monitor('display')
-        if monitor:
-            handler.serve_json(monitor.get_status())
-        else:
-            handler.serve_json({'error': 'Display monitor not available', 'status': 'unavailable'})
+# ==================== System Stats ====================
 
-    elif path == '/api/power/status':
-        monitor = get_monitor('power')
-        if monitor:
-            handler.serve_json(monitor.get_power_summary())
-        else:
-            handler.serve_json({'error': 'Power monitor not available', 'status': 'unavailable'})
+@agent_router.route('GET', '/api/stats')
+def handle_stats(handler):
+    handler.serve_json(handler.get_current_stats())
 
-    elif path == '/api/peripherals/devices':
-        monitor = get_monitor('peripheral')
-        if monitor:
-            handler.serve_json(monitor.get_connected_devices('all'))
-        else:
-            handler.serve_json({'error': 'Peripheral monitor not available', 'status': 'unavailable'})
 
-    elif path == '/api/security/status':
-        monitor = get_monitor('security')
-        if monitor:
-            handler.serve_json(monitor.get_current_security_status())
-        else:
-            handler.serve_json({'error': 'Security monitor not available', 'status': 'unavailable'})
+@agent_router.route('GET', '/api/health')
+def handle_health(handler):
+    handler.serve_json(get_system_health())
 
-    elif path == '/api/disk/health':
-        monitor = get_monitor('disk')
-        if monitor:
-            handler.serve_json(monitor.get_disk_health_summary())
-        else:
-            handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
 
-    elif path == '/api/disk/status':
-        monitor = get_monitor('disk')
-        if monitor:
-            result = monitor.get_detailed_disk_status()
-            handler.serve_json(result)
-        else:
-            handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
+# ==================== Speed Test ====================
 
-    elif path == '/api/software/inventory':
-        monitor = get_monitor('software')
-        if monitor:
-            handler.serve_json(monitor.get_inventory_summary())
-        else:
-            handler.serve_json({'error': 'Software monitor not available', 'status': 'unavailable'})
+@agent_router.route('GET', '/api/speedtest')
+def handle_speedtest(handler):
+    monitor = _get_speed_test_monitor()
+    handler.serve_json(monitor.get_last_result())
 
-    elif path == '/api/applications/status':
-        monitor = get_monitor('application')
-        if monitor:
-            handler.serve_json(monitor.get_crash_summary())
-        else:
-            handler.serve_json({'error': 'Application monitor not available', 'status': 'unavailable'})
 
-    elif path == '/api/system-health/overview':
-        _handle_system_health_overview(handler)
+@agent_router.route('GET', '/api/speedtest/history')
+def handle_speedtest_history(handler):
+    monitor = _get_speed_test_monitor()
+    handler.serve_json(monitor.get_history())
 
-    # ==================== Ping ====================
 
-    elif path == '/api/ping':
-        monitor = _get_ping_monitor()
-        handler.serve_json(monitor.get_last_result())
+@agent_router.route('GET', '/api/speedtest/slow-status')
+def handle_speedtest_slow_status(handler):
+    monitor = _get_speed_test_monitor()
+    handler.serve_json(monitor.get_slow_speed_status())
 
-    elif path == '/api/ping/stats':
-        monitor = _get_ping_monitor()
-        handler.serve_json(monitor.get_stats())
 
-    elif path == '/api/ping/history':
-        monitor = _get_ping_monitor()
-        handler.serve_json(monitor.get_history())
+@agent_router.route('GET', '/api/speedtest/mode')
+def handle_speedtest_mode_get(handler):
+    monitor = _get_speed_test_monitor()
+    handler.serve_json(monitor.get_mode_info())
 
-    elif path == '/api/ping/local-ip':
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-        except (OSError, socket.error):
-            local_ip = 'localhost'
-        handler.serve_json({'local_ip': local_ip})
 
-    # ==================== Network Quality ====================
+# ==================== Hardware Monitors ====================
 
-    elif path == '/api/network/udp-quality':
-        try:
-            from atlas.network.monitors import get_udp_quality_monitor
-            monitor = get_udp_quality_monitor()
-            result = monitor.get_last_result()
-            if not result or result.get('status') == 'idle':
-                ping_monitor = _get_ping_monitor()
-                ping_data = ping_monitor.get_stats()
-                result = {
-                    'status': 'estimated',
-                    'jitter_ms': 0,
-                    'packet_loss_percent': 0,
-                    'latency_ms': ping_data.get('avg_latency', 0),
-                    'note': 'UDP test not yet run - using ping estimates'
-                }
-            handler.serve_json(result)
-        except Exception as e:
-            handler.serve_json({'error': str(e), 'jitter_ms': 0, 'packet_loss_percent': 0})
+@agent_router.route('GET', '/api/display/status')
+def handle_display_status(handler):
+    monitor = get_monitor('display')
+    if monitor:
+        handler.serve_json(monitor.get_status())
+    else:
+        handler.serve_json({'error': 'Display monitor not available', 'status': 'unavailable'})
 
-    elif path == '/api/network/mos':
-        try:
-            from atlas.network.monitors import estimate_mos_simple, get_mos_color
+
+@agent_router.route('GET', '/api/power/status')
+def handle_power_status(handler):
+    monitor = get_monitor('power')
+    if monitor:
+        handler.serve_json(monitor.get_power_summary())
+    else:
+        handler.serve_json({'error': 'Power monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/peripherals/devices')
+def handle_peripherals_devices(handler):
+    monitor = get_monitor('peripheral')
+    if monitor:
+        handler.serve_json(monitor.get_connected_devices('all'))
+    else:
+        handler.serve_json({'error': 'Peripheral monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/security/status')
+def handle_security_status(handler):
+    monitor = get_monitor('security')
+    if monitor:
+        handler.serve_json(monitor.get_current_security_status())
+    else:
+        handler.serve_json({'error': 'Security monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/disk/health')
+def handle_disk_health(handler):
+    monitor = get_monitor('disk')
+    if monitor:
+        handler.serve_json(monitor.get_disk_health_summary())
+    else:
+        handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/disk/status')
+def handle_disk_status(handler):
+    monitor = get_monitor('disk')
+    if monitor:
+        result = monitor.get_detailed_disk_status()
+        handler.serve_json(result)
+    else:
+        handler.serve_json({'error': 'Disk monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/software/inventory')
+def handle_software_inventory(handler):
+    monitor = get_monitor('software')
+    if monitor:
+        handler.serve_json(monitor.get_inventory_summary())
+    else:
+        handler.serve_json({'error': 'Software monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/applications/status')
+def handle_applications_status(handler):
+    monitor = get_monitor('application')
+    if monitor:
+        handler.serve_json(monitor.get_crash_summary())
+    else:
+        handler.serve_json({'error': 'Application monitor not available', 'status': 'unavailable'})
+
+
+@agent_router.route('GET', '/api/system-health/overview')
+def handle_system_health_overview_route(handler):
+    _handle_system_health_overview(handler)
+
+
+# ==================== Ping ====================
+
+@agent_router.route('GET', '/api/ping')
+def handle_ping(handler):
+    monitor = _get_ping_monitor()
+    handler.serve_json(monitor.get_last_result())
+
+
+@agent_router.route('GET', '/api/ping/stats')
+def handle_ping_stats(handler):
+    monitor = _get_ping_monitor()
+    handler.serve_json(monitor.get_stats())
+
+
+@agent_router.route('GET', '/api/ping/history')
+def handle_ping_history(handler):
+    monitor = _get_ping_monitor()
+    handler.serve_json(monitor.get_history())
+
+
+@agent_router.route('GET', '/api/ping/local-ip')
+def handle_ping_local_ip(handler):
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except (OSError, socket.error):
+        local_ip = 'localhost'
+    handler.serve_json({'local_ip': local_ip})
+
+
+# ==================== Network Quality ====================
+
+@agent_router.route('GET', '/api/network/udp-quality')
+def handle_network_udp_quality(handler):
+    try:
+        from atlas.network.monitors import get_udp_quality_monitor
+        monitor = get_udp_quality_monitor()
+        result = monitor.get_last_result()
+        if not result or result.get('status') == 'idle':
             ping_monitor = _get_ping_monitor()
             ping_data = ping_monitor.get_stats()
-            latency = ping_data.get('avg_latency', 0)
-            jitter = abs(ping_data.get('max_latency', 0) - ping_data.get('min_latency', 0)) / 2
-            packet_loss = 100 - ping_data.get('success_rate', 100)
+            result = {
+                'status': 'estimated',
+                'jitter_ms': 0,
+                'packet_loss_percent': 0,
+                'latency_ms': ping_data.get('avg_latency', 0),
+                'note': 'UDP test not yet run - using ping estimates'
+            }
+        handler.serve_json(result)
+    except Exception as e:
+        handler.serve_json({'error': str(e), 'jitter_ms': 0, 'packet_loss_percent': 0})
 
-            mos, rating = estimate_mos_simple(latency, jitter, packet_loss)
-            handler.serve_json({
-                'mos': mos,
-                'rating': rating,
-                'color': get_mos_color(mos),
-                'input': {
-                    'latency_ms': latency,
-                    'jitter_ms': jitter,
-                    'packet_loss_percent': packet_loss
-                }
-            })
-        except Exception as e:
-            handler.serve_json({'error': str(e), 'mos': 1.0, 'rating': 'unknown'})
 
-    elif path == '/api/network/quality':
-        try:
-            from atlas.network.monitors.network_quality_monitor import get_network_quality_monitor
-            monitor = get_network_quality_monitor()
-            summary = monitor.get_quality_summary()
-            handler.serve_json(summary)
-        except Exception as e:
-            logger.error(f"Error getting network quality: {e}")
-            handler.serve_json({
-                'tcp': {'avg_retransmit_rate_percent': 0, 'max_retransmit_rate_percent': 0, 'sample_count': 0},
-                'dns': {'availability_percent': 0, 'avg_query_time_ms': 0, 'max_query_time_ms': 0, 'sample_count': 0},
-                'tls': {'success_rate_percent': 0, 'avg_handshake_time_ms': 0, 'max_handshake_time_ms': 0, 'sample_count': 0},
-                'http': {'success_rate_percent': 0, 'avg_response_time_ms': 0, 'max_response_time_ms': 0, 'sample_count': 0}
-            })
+@agent_router.route('GET', '/api/network/mos')
+def handle_network_mos(handler):
+    try:
+        from atlas.network.monitors import estimate_mos_simple, get_mos_color
+        ping_monitor = _get_ping_monitor()
+        ping_data = ping_monitor.get_stats()
+        latency = ping_data.get('avg_latency', 0)
+        jitter = abs(ping_data.get('max_latency', 0) - ping_data.get('min_latency', 0)) / 2
+        packet_loss = 100 - ping_data.get('success_rate', 100)
 
-    elif path == '/api/saas/health':
-        _handle_saas_health(handler)
+        mos, rating = estimate_mos_simple(latency, jitter, packet_loss)
+        handler.serve_json({
+            'mos': mos,
+            'rating': rating,
+            'color': get_mos_color(mos),
+            'input': {
+                'latency_ms': latency,
+                'jitter_ms': jitter,
+                'packet_loss_percent': packet_loss
+            }
+        })
+    except Exception as e:
+        handler.serve_json({'error': str(e), 'mos': 1.0, 'rating': 'unknown'})
 
-    # ==================== WiFi ====================
 
-    elif path == '/api/wifi':
-        monitor = get_wifi_monitor()
-        handler.serve_json(monitor.get_last_result())
+@agent_router.route('GET', '/api/network/quality')
+def handle_network_quality_get(handler):
+    try:
+        from atlas.network.monitors.network_quality_monitor import get_network_quality_monitor
+        monitor = get_network_quality_monitor()
+        summary = monitor.get_quality_summary()
+        handler.serve_json(summary)
+    except Exception as e:
+        logger.error(f"Error getting network quality: {e}")
+        handler.serve_json({
+            'tcp': {'avg_retransmit_rate_percent': 0, 'max_retransmit_rate_percent': 0, 'sample_count': 0},
+            'dns': {'availability_percent': 0, 'avg_query_time_ms': 0, 'max_query_time_ms': 0, 'sample_count': 0},
+            'tls': {'success_rate_percent': 0, 'avg_handshake_time_ms': 0, 'max_handshake_time_ms': 0, 'sample_count': 0},
+            'http': {'success_rate_percent': 0, 'avg_response_time_ms': 0, 'max_response_time_ms': 0, 'sample_count': 0}
+        })
 
-    elif path == '/api/wifi/history':
-        monitor = get_wifi_monitor()
-        handler.serve_json(monitor.get_history())
 
-    elif path == '/api/wifi/diagnosis':
-        monitor = get_wifi_monitor()
-        diagnosis = monitor.get_last_diagnosis()
-        if diagnosis:
-            handler.serve_json(diagnosis)
-        else:
-            diagnosis = monitor.run_diagnostics_now()
-            handler.serve_json(diagnosis)
+@agent_router.route('GET', '/api/saas/health')
+def handle_saas_health_route(handler):
+    _handle_saas_health(handler)
 
-    elif path == '/api/wifi/diagnose':
-        monitor = get_wifi_monitor()
+
+# ==================== WiFi ====================
+
+@agent_router.route('GET', '/api/wifi')
+def handle_wifi_status(handler):
+    monitor = get_wifi_monitor()
+    handler.serve_json(monitor.get_last_result())
+
+
+@agent_router.route('GET', '/api/wifi/history')
+def handle_wifi_history(handler):
+    monitor = get_wifi_monitor()
+    handler.serve_json(monitor.get_history())
+
+
+@agent_router.route('GET', '/api/wifi/diagnosis')
+def handle_wifi_diagnosis(handler):
+    monitor = get_wifi_monitor()
+    diagnosis = monitor.get_last_diagnosis()
+    if diagnosis:
+        handler.serve_json(diagnosis)
+    else:
         diagnosis = monitor.run_diagnostics_now()
         handler.serve_json(diagnosis)
 
-    elif path == '/api/wifi/signal/history/10m':
-        from atlas.wifi_analyzer import get_wifi_signal_logger
-        handler.serve_json(get_wifi_signal_logger().get_history('10m'))
 
-    elif path == '/api/wifi/signal/history/1h':
-        from atlas.wifi_analyzer import get_wifi_signal_logger
-        handler.serve_json(get_wifi_signal_logger().get_history('1h'))
+@agent_router.route('GET', '/api/wifi/diagnose')
+def handle_wifi_diagnose(handler):
+    monitor = get_wifi_monitor()
+    diagnosis = monitor.run_diagnostics_now()
+    handler.serve_json(diagnosis)
 
-    elif path == '/api/wifi/signal/history/24h':
-        from atlas.wifi_analyzer import get_wifi_signal_logger
-        handler.serve_json(get_wifi_signal_logger().get_history('24h'))
 
-    elif path == '/api/wifi/signal/history/7d':
-        from atlas.wifi_analyzer import get_wifi_signal_logger
-        handler.serve_json(get_wifi_signal_logger().get_history('7d'))
+@agent_router.route('GET', '/api/wifi/signal/history/10m')
+def handle_wifi_signal_history_10m(handler):
+    from atlas.wifi_analyzer import get_wifi_signal_logger
+    handler.serve_json(get_wifi_signal_logger().get_history('10m'))
 
-    elif path == '/api/wifi/signal/current':
-        from atlas.wifi_analyzer import get_wifi_signal_logger
-        handler.serve_json(get_wifi_signal_logger().get_current())
 
-    elif path == '/api/wifi/nearby':
-        from atlas.wifi_analyzer import get_nearby_scanner
-        networks = get_nearby_scanner().scan_networks()
-        handler.serve_json({
-            'networks': networks,
-            'count': len(networks),
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')
+@agent_router.route('GET', '/api/wifi/signal/history/1h')
+def handle_wifi_signal_history_1h(handler):
+    from atlas.wifi_analyzer import get_wifi_signal_logger
+    handler.serve_json(get_wifi_signal_logger().get_history('1h'))
+
+
+@agent_router.route('GET', '/api/wifi/signal/history/24h')
+def handle_wifi_signal_history_24h(handler):
+    from atlas.wifi_analyzer import get_wifi_signal_logger
+    handler.serve_json(get_wifi_signal_logger().get_history('24h'))
+
+
+@agent_router.route('GET', '/api/wifi/signal/history/7d')
+def handle_wifi_signal_history_7d(handler):
+    from atlas.wifi_analyzer import get_wifi_signal_logger
+    handler.serve_json(get_wifi_signal_logger().get_history('7d'))
+
+
+@agent_router.route('GET', '/api/wifi/signal/current')
+def handle_wifi_signal_current(handler):
+    from atlas.wifi_analyzer import get_wifi_signal_logger
+    handler.serve_json(get_wifi_signal_logger().get_current())
+
+
+@agent_router.route('GET', '/api/wifi/nearby')
+def handle_wifi_nearby(handler):
+    from atlas.wifi_analyzer import get_nearby_scanner
+    networks = get_nearby_scanner().scan_networks()
+    handler.serve_json({
+        'networks': networks,
+        'count': len(networks),
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')
+    })
+
+
+@agent_router.route('GET', '/api/wifi/channels')
+def handle_wifi_channels(handler):
+    from atlas.wifi_analyzer import get_nearby_scanner
+    handler.serve_json(get_nearby_scanner().get_channel_analysis())
+
+
+@agent_router.route('GET', '/api/wifi/spectrum')
+def handle_wifi_spectrum(handler):
+    from atlas.wifi_analyzer import get_nearby_scanner
+    handler.serve_json(get_nearby_scanner().get_spectrum_data())
+
+
+@agent_router.route('GET', '/api/wifi/alias/current')
+def handle_wifi_alias_current(handler):
+    from atlas.wifi_analyzer import get_network_alias_manager
+    manager = get_network_alias_manager()
+    fingerprint = manager.get_current_fingerprint()
+    alias = manager.get_alias(fingerprint) if fingerprint else None
+    handler.serve_json({
+        'fingerprint': fingerprint,
+        'alias': alias,
+        'has_alias': alias is not None
+    })
+
+
+@agent_router.route('GET', '/api/wifi/alias/all')
+def handle_wifi_alias_all(handler):
+    from atlas.wifi_analyzer import get_network_alias_manager
+    manager = get_network_alias_manager()
+    aliases = manager.get_all_aliases()
+    handler.serve_json({
+        'aliases': aliases,
+        'count': len(aliases)
+    })
+
+
+# ==================== Speed Correlation ====================
+
+@agent_router.route('GET', '/api/speed-correlation/analysis')
+def handle_speed_correlation_analysis(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.speed_correlation import get_speed_correlation_analyzer
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 168, max_val=8760)
+    analyzer = get_speed_correlation_analyzer()
+    handler.serve_json(analyzer.get_correlation_analysis(hours))
+
+
+@agent_router.route('GET', '/api/speed-correlation/data')
+def handle_speed_correlation_data(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.speed_correlation import get_speed_correlation_analyzer
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 168, max_val=8760)
+    analyzer = get_speed_correlation_analyzer()
+    handler.serve_json({
+        'data': analyzer.get_correlated_data(hours),
+        'hours': hours
+    })
+
+
+@agent_router.route('GET', '/api/speed-correlation/summary')
+def handle_speed_correlation_summary(handler):
+    from atlas.speed_correlation import get_speed_correlation_analyzer
+    analyzer = get_speed_correlation_analyzer()
+    handler.serve_json(analyzer.get_summary())
+
+
+# ==================== WiFi Roaming ====================
+
+@agent_router.route('GET', '/api/wifi/roaming')
+def handle_wifi_roaming_route(handler):
+    _handle_wifi_roaming(handler)
+
+
+@agent_router.route('GET', '/api/wifi/roaming/events')
+def handle_wifi_roaming_events(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.wifi_roaming import get_wifi_roaming_tracker
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    event_type = params.get('type', [None])[0]
+    tracker = get_wifi_roaming_tracker()
+    handler.serve_json({
+        'events': tracker.get_events(hours, event_type),
+        'hours': hours
+    })
+
+
+@agent_router.route('GET', '/api/wifi/roaming/sessions')
+def handle_wifi_roaming_sessions(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.wifi_roaming import get_wifi_roaming_tracker
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    tracker = get_wifi_roaming_tracker()
+    handler.serve_json({
+        'sessions': tracker.get_sessions(hours),
+        'hours': hours
+    })
+
+
+@agent_router.route('GET', '/api/wifi/roaming/stats')
+def handle_wifi_roaming_stats(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.wifi_roaming import get_wifi_roaming_tracker
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    tracker = get_wifi_roaming_tracker()
+    handler.serve_json(tracker.get_statistics(hours))
+
+
+@agent_router.route('GET', '/api/wifi/roaming/timeline')
+def handle_wifi_roaming_timeline(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.wifi_roaming import get_wifi_roaming_tracker
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    tracker = get_wifi_roaming_tracker()
+    handler.serve_json({
+        'timeline': tracker.get_timeline(hours),
+        'hours': hours
+    })
+
+
+@agent_router.route('GET', '/api/wifi/roaming/current')
+def handle_wifi_roaming_current(handler):
+    from atlas.wifi_roaming import get_wifi_roaming_tracker
+    tracker = get_wifi_roaming_tracker()
+    handler.serve_json(tracker.get_current_state())
+
+
+# ==================== Processes (GET) ====================
+# NOTE: Specific routes registered before the generic /api/processes
+
+@agent_router.route('GET', '/api/processes/search')
+def handle_processes_search(handler):
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    query = params.get('q', [''])[0]
+    processes = process_monitor.search_processes(query)
+    running = sum(1 for p in processes if p['status'] == 'running')
+    handler.serve_json({
+        'processes': processes,
+        'total': len(processes),
+        'running': running,
+        'timestamp': process_monitor.last_update
+    })
+
+
+@agent_router.route('GET', '/api/processes/problematic')
+def handle_processes_problematic(handler):
+    problematic = process_monitor.get_problematic_processes()
+    handler.serve_json(problematic)
+
+
+@agent_router.route('GET', '/api/processes')
+def handle_processes(handler):
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    sort_by = params.get('sort', ['cpu'])[0]
+    limit = safe_int_param(params, 'limit', 10, max_val=10000)
+    processes = process_monitor.get_top_processes(sort_by=sort_by, limit=limit)
+    running = sum(1 for p in processes if p['status'] == 'running')
+    handler.serve_json({
+        'processes': processes,
+        'total': len(processes),
+        'running': running,
+        'timestamp': process_monitor.last_update
+    })
+
+
+# ==================== Tools & Licensing ====================
+
+@agent_router.route('GET', '/api/tools/status')
+def handle_tools_status(handler):
+    from atlas.tool_availability import get_tool_monitor
+    tool_monitor = get_tool_monitor()
+    status = tool_monitor.get_all_tool_status()
+    tools_list = []
+    for name, info in status.items():
+        tools_list.append({
+            'name': info['name'],
+            'installed': info['installed'],
+            'path': info['path'],
+            'description': info['description'],
+            'license': info['license'],
+            'license_type': 'permissive' if info['license'] in ['MIT', 'Apache-2.0', 'BSD-3-Clause'] else 'copyleft',
+            'brew_package': info['brew_package'],
+            'requires_sudo': info['requires_sudo'],
+            'value_for_atlas': info['value_for_atlas'],
+            'attribution': info['attribution']
         })
+    handler.serve_json({
+        'tools': tools_list,
+        'installed_count': len(tool_monitor.get_installed_tools()),
+        'missing_count': len(tool_monitor.get_missing_tools()),
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')
+    })
 
-    elif path == '/api/wifi/channels':
-        from atlas.wifi_analyzer import get_nearby_scanner
-        handler.serve_json(get_nearby_scanner().get_channel_analysis())
 
-    elif path == '/api/wifi/spectrum':
-        from atlas.wifi_analyzer import get_nearby_scanner
-        handler.serve_json(get_nearby_scanner().get_spectrum_data())
+@agent_router.route('GET', '/api/tools/licensing')
+def handle_tools_licensing(handler):
+    from atlas.licensing import get_api_licensing_info
+    handler.serve_json(get_api_licensing_info())
 
-    elif path == '/api/wifi/alias/current':
-        from atlas.wifi_analyzer import get_network_alias_manager
-        manager = get_network_alias_manager()
-        fingerprint = manager.get_current_fingerprint()
-        alias = manager.get_alias(fingerprint) if fingerprint else None
-        handler.serve_json({
-            'fingerprint': fingerprint,
-            'alias': alias,
-            'has_alias': alias is not None
-        })
 
-    elif path == '/api/wifi/alias/all':
-        from atlas.wifi_analyzer import get_network_alias_manager
-        manager = get_network_alias_manager()
-        aliases = manager.get_all_aliases()
-        handler.serve_json({
-            'aliases': aliases,
-            'count': len(aliases)
-        })
+# ==================== Network Path ====================
 
-    # ==================== Speed Correlation ====================
+@agent_router.route('GET', '/api/traceroute')
+def handle_traceroute(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.enhanced_traceroute import get_tracer
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    target = params.get('target', ['8.8.8.8'])[0]
+    count = safe_int_param(params, 'count', 3, max_val=100)
+    tracer = get_tracer()
+    result = tracer.trace(target, count=count, max_hops=20)
+    handler.serve_json(result.to_dict())
 
-    elif path == '/api/speed-correlation/analysis':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.speed_correlation import get_speed_correlation_analyzer
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 168, max_val=8760)
-        analyzer = get_speed_correlation_analyzer()
-        handler.serve_json(analyzer.get_correlation_analysis(hours))
 
-    elif path == '/api/speed-correlation/data':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.speed_correlation import get_speed_correlation_analyzer
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 168, max_val=8760)
-        analyzer = get_speed_correlation_analyzer()
-        handler.serve_json({
-            'data': analyzer.get_correlated_data(hours),
-            'hours': hours
-        })
+@agent_router.route('GET', '/api/traceroute/quick')
+def handle_traceroute_quick(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.enhanced_traceroute import get_tracer
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    target = params.get('target', ['8.8.8.8'])[0]
+    tracer = get_tracer()
+    result = tracer.quick_trace(target)
+    handler.serve_json(result)
 
-    elif path == '/api/speed-correlation/summary':
-        from atlas.speed_correlation import get_speed_correlation_analyzer
-        analyzer = get_speed_correlation_analyzer()
-        handler.serve_json(analyzer.get_summary())
 
-    # ==================== WiFi Roaming ====================
+@agent_router.route('GET', '/api/network/path-summary')
+def handle_network_path_summary_route(handler):
+    _handle_network_path_summary(handler)
 
-    elif path == '/api/wifi/roaming':
-        _handle_wifi_roaming(handler)
 
-    elif path == '/api/wifi/roaming/events':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.wifi_roaming import get_wifi_roaming_tracker
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        event_type = params.get('type', [None])[0]
-        tracker = get_wifi_roaming_tracker()
-        handler.serve_json({
-            'events': tracker.get_events(hours, event_type),
-            'hours': hours
-        })
+# ==================== Agent Health ====================
 
-    elif path == '/api/wifi/roaming/sessions':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.wifi_roaming import get_wifi_roaming_tracker
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        tracker = get_wifi_roaming_tracker()
-        handler.serve_json({
-            'sessions': tracker.get_sessions(hours),
-            'hours': hours
-        })
+@agent_router.route('GET', '/api/agent/health')
+def handle_agent_health_route(handler):
+    _handle_agent_health(handler)
 
-    elif path == '/api/wifi/roaming/stats':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.wifi_roaming import get_wifi_roaming_tracker
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        tracker = get_wifi_roaming_tracker()
-        handler.serve_json(tracker.get_statistics(hours))
 
-    elif path == '/api/wifi/roaming/timeline':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.wifi_roaming import get_wifi_roaming_tracker
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        tracker = get_wifi_roaming_tracker()
-        handler.serve_json({
-            'timeline': tracker.get_timeline(hours),
-            'hours': hours
-        })
+# ==================== System Pressure ====================
 
-    elif path == '/api/wifi/roaming/current':
-        from atlas.wifi_roaming import get_wifi_roaming_tracker
-        tracker = get_wifi_roaming_tracker()
-        handler.serve_json(tracker.get_current_state())
+@agent_router.route('GET', '/api/system/pressure')
+def handle_system_pressure_route(handler):
+    _handle_system_pressure(handler)
 
-    # ==================== Processes ====================
 
-    elif path == '/api/processes':
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        sort_by = params.get('sort', ['cpu'])[0]
-        limit = safe_int_param(params, 'limit', 10, max_val=10000)
-        processes = process_monitor.get_top_processes(sort_by=sort_by, limit=limit)
-        running = sum(1 for p in processes if p['status'] == 'running')
-        handler.serve_json({
-            'processes': processes,
-            'total': len(processes),
-            'running': running,
-            'timestamp': process_monitor.last_update
-        })
+# ==================== Data Export (GET) ====================
+# NOTE: /api/wifi/events/export registered before /api/wifi/export
 
-    elif path.startswith('/api/processes/search'):
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        query = params.get('q', [''])[0]
-        processes = process_monitor.search_processes(query)
-        running = sum(1 for p in processes if p['status'] == 'running')
-        handler.serve_json({
-            'processes': processes,
-            'total': len(processes),
-            'running': running,
-            'timestamp': process_monitor.last_update
-        })
+@agent_router.route('GET', '/api/ping/export')
+def handle_ping_export_get(handler):
+    _handle_export(handler, 'ping')
 
-    elif path == '/api/processes/problematic':
-        problematic = process_monitor.get_problematic_processes()
-        handler.serve_json(problematic)
 
-    # ==================== Tools & Licensing ====================
+@agent_router.route('GET', '/api/speedtest/export')
+def handle_speedtest_export_get(handler):
+    _handle_export(handler, 'speedtest')
 
-    elif path == '/api/tools/status':
-        from atlas.tool_availability import get_tool_monitor
-        tool_monitor = get_tool_monitor()
-        status = tool_monitor.get_all_tool_status()
-        tools_list = []
-        for name, info in status.items():
-            tools_list.append({
-                'name': info['name'],
-                'installed': info['installed'],
-                'path': info['path'],
-                'description': info['description'],
-                'license': info['license'],
-                'license_type': 'permissive' if info['license'] in ['MIT', 'Apache-2.0', 'BSD-3-Clause'] else 'copyleft',
-                'brew_package': info['brew_package'],
-                'requires_sudo': info['requires_sudo'],
-                'value_for_atlas': info['value_for_atlas'],
-                'attribution': info['attribution']
-            })
-        handler.serve_json({
-            'tools': tools_list,
-            'installed_count': len(tool_monitor.get_installed_tools()),
-            'missing_count': len(tool_monitor.get_missing_tools()),
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')
-        })
 
-    elif path == '/api/tools/licensing':
-        from atlas.licensing import get_api_licensing_info
-        handler.serve_json(get_api_licensing_info())
+@agent_router.route('GET', '/api/wifi/events/export')
+def handle_wifi_events_export_get(handler):
+    _handle_export(handler, 'wifi_events')
 
-    # ==================== Network Path ====================
 
-    elif path == '/api/traceroute':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.enhanced_traceroute import get_tracer
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        target = params.get('target', ['8.8.8.8'])[0]
-        count = safe_int_param(params, 'count', 3, max_val=100)
-        tracer = get_tracer()
-        result = tracer.trace(target, count=count, max_hops=20)
-        handler.serve_json(result.to_dict())
+@agent_router.route('GET', '/api/wifi/export')
+def handle_wifi_export_get(handler):
+    _handle_export(handler, 'wifi')
 
-    elif path == '/api/traceroute/quick':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.enhanced_traceroute import get_tracer
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        target = params.get('target', ['8.8.8.8'])[0]
-        tracer = get_tracer()
-        result = tracer.quick_trace(target)
+
+# ==================== Network Analysis ====================
+
+@agent_router.route('GET', '/api/network/analysis')
+def handle_network_analysis(handler):
+    from urllib.parse import urlparse, parse_qs
+    from atlas.network_analyzer import get_network_analyzer
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    analyzer = get_network_analyzer()
+    report = analyzer.get_analysis_report(hours=hours)
+    handler.serve_json(report)
+
+
+@agent_router.route('GET', '/api/network/analysis/latest')
+def handle_network_analysis_latest(handler):
+    from atlas.network_analyzer import get_network_analyzer
+    analyzer = get_network_analyzer()
+    latest = analyzer.get_latest_analysis()
+    handler.serve_json(latest)
+
+
+@agent_router.route('GET', '/api/network/analysis/settings')
+def handle_network_analysis_settings_get(handler):
+    from atlas.network_analysis_settings import get_settings
+    settings = get_settings()
+    handler.serve_json(settings.get_all())
+
+
+# ==================== Notifications ====================
+
+@agent_router.route('GET', '/api/notifications/status')
+def handle_notifications_status(handler):
+    from atlas.notification_manager import get_notification_manager
+    manager = get_notification_manager()
+    handler.serve_json({
+        'enabled': manager.is_enabled(),
+        'min_interval_minutes': manager.min_notification_interval.total_seconds() / 60
+    })
+
+
+@agent_router.route('GET', '/api/notifications/history')
+def handle_notifications_history(handler):
+    from atlas.notification_manager import get_notification_manager
+    manager = get_notification_manager()
+    history = manager.get_notification_history(limit=50)
+    handler.serve_json({'notifications': history})
+
+
+# ==================== Alert Rules (GET) ====================
+# NOTE: Specific routes registered before parameterized /api/alerts/rules/{rule_id}
+
+@agent_router.route('GET', '/api/alerts/rules')
+def handle_alerts_rules_list(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    manager = get_alert_rules_manager()
+    include_disabled = handler.path.find('include_disabled=true') != -1
+    rules = manager.list_rules(include_disabled=include_disabled)
+    handler.serve_json({
+        'rules': [r.to_dict() for r in rules],
+        'count': len(rules)
+    })
+
+
+@agent_router.route('GET', '/api/alerts/events')
+def handle_alerts_events(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    manager = get_alert_rules_manager()
+    events = manager.get_alert_events(
+        rule_id=params.get('rule_id', [None])[0],
+        severity=params.get('severity', [None])[0],
+        hours=safe_int_param(params, 'hours', 24, max_val=8760),
+        limit=safe_int_param(params, 'limit', 100, max_val=10000)
+    )
+    handler.serve_json({
+        'events': [e.to_dict() for e in events],
+        'count': len(events)
+    })
+
+
+@agent_router.route('GET', '/api/alerts/statistics')
+def handle_alerts_statistics(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(handler.path)
+    params = parse_qs(parsed.query)
+    hours = safe_int_param(params, 'hours', 24, max_val=8760)
+    manager = get_alert_rules_manager()
+    stats = manager.get_alert_statistics(hours)
+    handler.serve_json(stats)
+
+
+@agent_router.route('GET', '/api/alerts/email-config')
+def handle_alerts_email_config_get(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    manager = get_alert_rules_manager()
+    config = manager.get_email_config()
+    handler.serve_json(config or {'configured': False})
+
+
+@agent_router.route('GET', '/api/alerts/metrics')
+def handle_alerts_metrics(handler):
+    from atlas.alert_rules_manager import MetricType, Condition, AlertSeverity
+    handler.serve_json({
+        'metric_types': [m.value for m in MetricType],
+        'conditions': [c.value for c in Condition],
+        'severities': [s.value for s in AlertSeverity]
+    })
+
+
+@agent_router.route('GET', '/api/alerts/rules/{rule_id}')
+def handle_alerts_rule_detail(handler, rule_id):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    manager = get_alert_rules_manager()
+    rule = manager.get_rule(rule_id)
+    if rule:
+        handler.serve_json(rule.to_dict())
+    else:
+        handler.send_error(404, f"Rule not found: {rule_id}")
+
+
+# ==================== OSI Layers Diagnostic (GET) ====================
+
+@agent_router.route('GET', '/api/osi-layers')
+def handle_osi_layers(handler):
+    from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+    monitor = get_osi_diagnostic_monitor()
+    handler.serve_json(monitor.get_last_result())
+
+
+# ==================== POST Routes ====================
+
+# ==================== Processes (POST) ====================
+
+@agent_router.route('POST', '/api/processes/kill/{pid}')
+def handle_process_kill(handler, pid):
+    try:
+        pid_int = int(pid)
+        result = process_monitor.kill_process(pid_int)
         handler.serve_json(result)
+    except ValueError:
+        handler.send_error(400, "Invalid PID")
 
-    elif path == '/api/network/path-summary':
-        _handle_network_path_summary(handler)
 
-    # ==================== Agent Health ====================
+# ==================== Network Analysis Settings (POST) ====================
 
-    elif path == '/api/agent/health':
-        _handle_agent_health(handler)
-
-    # ==================== System Pressure ====================
-
-    elif path == '/api/system/pressure':
-        _handle_system_pressure(handler)
-
-    # ==================== Data Export ====================
-
-    elif path.startswith('/api/ping/export'):
-        _handle_export(handler, 'ping')
-
-    elif path.startswith('/api/speedtest/export'):
-        _handle_export(handler, 'speedtest')
-
-    elif path.startswith('/api/wifi/events/export'):
-        _handle_export(handler, 'wifi_events')
-
-    elif path.startswith('/api/wifi/export'):
-        _handle_export(handler, 'wifi')
-
-    # ==================== Network Analysis ====================
-
-    elif path == '/api/network/analysis':
-        from urllib.parse import urlparse, parse_qs
-        from atlas.network_analyzer import get_network_analyzer
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = 24
-        if 'hours' in params:
-            try:
-                hours = int(params['hours'][0])
-            except (ValueError, IndexError):
-                pass
-        analyzer = get_network_analyzer()
-        report = analyzer.get_analysis_report(hours=hours)
-        handler.serve_json(report)
-
-    elif path == '/api/network/analysis/latest':
-        from atlas.network_analyzer import get_network_analyzer
-        analyzer = get_network_analyzer()
-        latest = analyzer.get_latest_analysis()
-        handler.serve_json(latest)
-
-    elif path == '/api/network/analysis/settings':
-        from atlas.network_analysis_settings import get_settings
-        settings = get_settings()
-        handler.serve_json(settings.get_all())
-
-    # ==================== Notifications ====================
-
-    elif path == '/api/notifications/status':
-        from atlas.notification_manager import get_notification_manager
-        manager = get_notification_manager()
-        handler.serve_json({
-            'enabled': manager.is_enabled(),
-            'min_interval_minutes': manager.min_notification_interval.total_seconds() / 60
-        })
-
-    elif path == '/api/notifications/history':
-        from atlas.notification_manager import get_notification_manager
-        manager = get_notification_manager()
-        history = manager.get_notification_history(limit=50)
-        handler.serve_json({'notifications': history})
-
-    # ==================== Alert Rules (GET) ====================
-
-    elif path == '/api/alerts/rules':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        manager = get_alert_rules_manager()
-        include_disabled = handler.path.find('include_disabled=true') != -1
-        rules = manager.list_rules(include_disabled=include_disabled)
-        handler.serve_json({
-            'rules': [r.to_dict() for r in rules],
-            'count': len(rules)
-        })
-
-    elif path.startswith('/api/alerts/rules/') and not path.endswith('/events'):
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        rule_id = path.split('/api/alerts/rules/')[-1].split('?')[0]
-        manager = get_alert_rules_manager()
-        rule = manager.get_rule(rule_id)
-        if rule:
-            handler.serve_json(rule.to_dict())
-        else:
-            handler.send_error(404, f"Rule not found: {rule_id}")
-
-    elif path == '/api/alerts/events':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        manager = get_alert_rules_manager()
-        events = manager.get_alert_events(
-            rule_id=params.get('rule_id', [None])[0],
-            severity=params.get('severity', [None])[0],
-            hours=safe_int_param(params, 'hours', 24, max_val=8760),
-            limit=safe_int_param(params, 'limit', 100, max_val=10000)
-        )
-        handler.serve_json({
-            'events': [e.to_dict() for e in events],
-            'count': len(events)
-        })
-
-    elif path == '/api/alerts/statistics':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(handler.path)
-        params = parse_qs(parsed.query)
-        hours = safe_int_param(params, 'hours', 24, max_val=8760)
-        manager = get_alert_rules_manager()
-        stats = manager.get_alert_statistics(hours)
-        handler.serve_json(stats)
-
-    elif path == '/api/alerts/email-config':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        manager = get_alert_rules_manager()
-        config = manager.get_email_config()
-        handler.serve_json(config or {'configured': False})
-
-    elif path == '/api/alerts/metrics':
-        from atlas.alert_rules_manager import MetricType, Condition, AlertSeverity
-        handler.serve_json({
-            'metric_types': [m.value for m in MetricType],
-            'conditions': [c.value for c in Condition],
-            'severities': [s.value for s in AlertSeverity]
-        })
-
-    # ==================== OSI Layers Diagnostic ====================
-
-    elif path == '/api/osi-layers':
-        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
-        monitor = get_osi_diagnostic_monitor()
-        handler.serve_json(monitor.get_last_result())
-
+@agent_router.route('POST', '/api/network/analysis/settings')
+def handle_network_analysis_settings_post(handler):
+    from atlas.network_analysis_settings import get_settings
+    body = handler._read_body()
+    if body is None:
+        return
+    new_settings = json.loads(body.decode('utf-8'))
+    settings = get_settings()
+    valid, error = settings.validate_settings(new_settings)
+    if not valid:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': error}).encode())
+        return
+    success = settings.update(new_settings)
+    if success:
+        handler.serve_json({'status': 'success', 'settings': settings.get_all()})
     else:
-        return False
-
-    return True
+        handler.send_error(500, "Failed to save settings")
 
 
-def dispatch_post(handler, path):
-    """Handle POST requests for API endpoints.
+# ==================== Dashboard Layout (POST) ====================
 
-    Note: Auth POST routes (/login, /api/auth/*) are handled inline
-    in LiveWidgetHandler.do_POST since they run before the auth check.
+@agent_router.route('POST', '/api/dashboard/layout')
+def handle_dashboard_layout_post(handler):
+    prefs = get_dashboard_preferences()
+    body = handler._read_body()
+    if body is None:
+        return
+    new_layout = json.loads(body.decode('utf-8'))
+    success = prefs.update_layout(new_layout)
+    if success:
+        handler.serve_json({'status': 'success', 'layout': prefs.get_layout()})
+    else:
+        handler.send_error(500, "Failed to save layout")
 
-    Args:
-        handler: LiveWidgetHandler instance
-        path: URL path (without query string)
 
-    Returns:
-        True if the request was handled, False otherwise
-    """
-    # ==================== Processes ====================
+@agent_router.route('POST', '/api/dashboard/layout/reset')
+def handle_dashboard_layout_reset(handler):
+    prefs = get_dashboard_preferences()
+    success = prefs.reset_to_default()
+    if success:
+        handler.serve_json({'status': 'success', 'layout': prefs.get_layout()})
+    else:
+        handler.send_error(500, "Failed to reset layout")
 
-    if path.startswith('/api/processes/kill/'):
-        pid_str = path.split('/')[-1]
-        try:
-            pid = int(pid_str)
-            result = process_monitor.kill_process(pid)
-            handler.serve_json(result)
-        except ValueError:
-            handler.send_error(400, "Invalid PID")
 
-    # ==================== Network Analysis Settings ====================
+# ==================== Notifications (POST) ====================
 
-    elif path == '/api/network/analysis/settings':
-        from atlas.network_analysis_settings import get_settings
-        body = handler._read_body()
-        if body is None:
-            return True
-        new_settings = json.loads(body.decode('utf-8'))
-        settings = get_settings()
-        valid, error = settings.validate_settings(new_settings)
-        if not valid:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': error}).encode())
-            return True
-        success = settings.update(new_settings)
-        if success:
-            handler.serve_json({'status': 'success', 'settings': settings.get_all()})
-        else:
-            handler.send_error(500, "Failed to save settings")
+@agent_router.route('POST', '/api/notifications/enable')
+def handle_notifications_enable(handler):
+    from atlas.notification_manager import get_notification_manager
+    manager = get_notification_manager()
+    manager.enable_notifications()
+    handler.serve_json({'status': 'success', 'enabled': True})
 
-    # ==================== Dashboard Layout ====================
 
-    elif path == '/api/dashboard/layout':
-        prefs = get_dashboard_preferences()
-        body = handler._read_body()
-        if body is None:
-            return True
-        new_layout = json.loads(body.decode('utf-8'))
-        success = prefs.update_layout(new_layout)
-        if success:
-            handler.serve_json({'status': 'success', 'layout': prefs.get_layout()})
-        else:
-            handler.send_error(500, "Failed to save layout")
+@agent_router.route('POST', '/api/notifications/disable')
+def handle_notifications_disable(handler):
+    from atlas.notification_manager import get_notification_manager
+    manager = get_notification_manager()
+    manager.disable_notifications()
+    handler.serve_json({'status': 'success', 'enabled': False})
 
-    elif path == '/api/dashboard/layout/reset':
-        prefs = get_dashboard_preferences()
-        success = prefs.reset_to_default()
-        if success:
-            handler.serve_json({'status': 'success', 'layout': prefs.get_layout()})
-        else:
-            handler.send_error(500, "Failed to reset layout")
 
-    # ==================== Notifications ====================
+@agent_router.route('POST', '/api/notifications/test')
+def handle_notifications_test(handler):
+    from atlas.notification_manager import get_notification_manager
+    manager = get_notification_manager()
+    success = manager.send_custom_notification(
+        "ATLAS Test Notification",
+        "This is a test notification from ATLAS Agent"
+    )
+    handler.serve_json({'status': 'success' if success else 'failed', 'sent': success})
 
-    elif path == '/api/notifications/enable':
-        from atlas.notification_manager import get_notification_manager
-        manager = get_notification_manager()
-        manager.enable_notifications()
-        handler.serve_json({'status': 'success', 'enabled': True})
 
-    elif path == '/api/notifications/disable':
-        from atlas.notification_manager import get_notification_manager
-        manager = get_notification_manager()
-        manager.disable_notifications()
-        handler.serve_json({'status': 'success', 'enabled': False})
+# ==================== Speed Test (POST) ====================
 
-    elif path == '/api/notifications/test':
-        from atlas.notification_manager import get_notification_manager
-        manager = get_notification_manager()
-        success = manager.send_custom_notification(
-            "ATLAS Test Notification",
-            "This is a test notification from ATLAS Agent"
-        )
-        handler.serve_json({'status': 'success' if success else 'failed', 'sent': success})
+@agent_router.route('POST', '/api/speedtest/run')
+def handle_speedtest_run(handler):
+    monitor = _get_speed_test_monitor()
+    monitor.run_test_now()
+    handler.serve_json({'status': 'started', 'message': 'Speed test started', 'mode': monitor.get_test_mode()})
 
-    # ==================== Speed Test ====================
 
-    elif path == '/api/speedtest/run':
-        monitor = _get_speed_test_monitor()
-        monitor.run_test_now()
-        handler.serve_json({'status': 'started', 'message': 'Speed test started', 'mode': monitor.get_test_mode()})
+@agent_router.route('POST', '/api/speedtest/run-full')
+def handle_speedtest_run_full(handler):
+    monitor = _get_speed_test_monitor()
+    monitor.run_full_test_now()
+    handler.serve_json({'status': 'started', 'message': 'Full speed test started', 'mode': 'full'})
 
-    elif path == '/api/speedtest/run-full':
-        monitor = _get_speed_test_monitor()
-        monitor.run_full_test_now()
-        handler.serve_json({'status': 'started', 'message': 'Full speed test started', 'mode': 'full'})
 
-    elif path == '/api/speedtest/mode':
-        monitor = _get_speed_test_monitor()
-        handler.serve_json(monitor.get_mode_info())
+@agent_router.route('POST', '/api/speedtest/mode')
+def handle_speedtest_mode_post(handler):
+    monitor = _get_speed_test_monitor()
+    handler.serve_json(monitor.get_mode_info())
 
-    elif path == '/api/speedtest/mode/set':
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        mode = data.get('mode', 'lite')
-        monitor = _get_speed_test_monitor()
-        success = monitor.set_test_mode(mode)
-        if success:
-            handler.serve_json({'status': 'success', 'mode': mode, 'message': f'Speed test mode set to {mode}'})
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': f'Invalid mode: {mode}. Use "lite" or "full"'}).encode())
 
-    # ==================== WiFi Aliases ====================
+@agent_router.route('POST', '/api/speedtest/mode/set')
+def handle_speedtest_mode_set(handler):
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    mode = data.get('mode', 'lite')
+    monitor = _get_speed_test_monitor()
+    success = monitor.set_test_mode(mode)
+    if success:
+        handler.serve_json({'status': 'success', 'mode': mode, 'message': f'Speed test mode set to {mode}'})
+    else:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': f'Invalid mode: {mode}. Use "lite" or "full"'}).encode())
 
-    elif path == '/api/wifi/alias/set':
-        from atlas.wifi_analyzer import get_network_alias_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        alias = data.get('alias', '').strip()
-        if not alias:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': 'Alias is required'}).encode())
-            return True
+
+# ==================== WiFi Aliases (POST) ====================
+
+@agent_router.route('POST', '/api/wifi/alias/set')
+def handle_wifi_alias_set(handler):
+    from atlas.wifi_analyzer import get_network_alias_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    alias = data.get('alias', '').strip()
+    if not alias:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'Alias is required'}).encode())
+        return
+    manager = get_network_alias_manager()
+    fingerprint = manager.get_current_fingerprint()
+    if not fingerprint:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'No network connected'}).encode())
+        return
+    manager.set_alias(fingerprint, alias)
+    handler.serve_json({
+        'status': 'success',
+        'fingerprint': fingerprint,
+        'alias': alias
+    })
+
+
+@agent_router.route('POST', '/api/wifi/alias/remove')
+def handle_wifi_alias_remove(handler):
+    from atlas.wifi_analyzer import get_network_alias_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    fingerprint = data.get('fingerprint', '')
+    if not fingerprint:
         manager = get_network_alias_manager()
         fingerprint = manager.get_current_fingerprint()
-        if not fingerprint:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': 'No network connected'}).encode())
-            return True
-        manager.set_alias(fingerprint, alias)
+    if not fingerprint:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'No fingerprint provided'}).encode())
+        return
+    manager = get_network_alias_manager()
+    success = manager.remove_alias(fingerprint)
+    handler.serve_json({
+        'status': 'success' if success else 'not_found',
+        'fingerprint': fingerprint
+    })
+
+
+# ==================== Network Testing (POST) ====================
+
+@agent_router.route('POST', '/api/network/connection-test')
+def handle_network_connection_test(handler):
+    try:
+        from atlas.network.monitors import get_tcp_connection_tester
+        body = handler._read_body()
+        if body is None:
+            return
+        body = body if body else b'{}'
+        json.loads(body.decode('utf-8'))
+        tester = get_tcp_connection_tester()
+        result = tester.run_single_test()
+        handler.serve_json(result)
+    except Exception as e:
+        logger.error(f"Connection test error: {e}")
+        handler.serve_json({'error': 'Test failed', 'status': 'failed'})
+
+
+@agent_router.route('POST', '/api/network/throughput-test')
+def handle_network_throughput_test(handler):
+    try:
+        from atlas.network.monitors import get_throughput_tester
+        body = handler._read_body()
+        if body is None:
+            return
+        body = body if body else b'{}'
+        data = json.loads(body.decode('utf-8'))
+        server_host = data.get('server_host')
+        server_port = data.get('server_port', 5007)
+        duration = data.get('duration', 5)
+        if not server_host:
+            handler.serve_json({'error': 'server_host is required', 'status': 'failed'})
+            return
+        tester = get_throughput_tester(server_host)
+        tester.set_server(server_host, server_port)
+        tester.test_duration = duration
+        result = tester.run_full_test()
+        handler.serve_json(result)
+    except Exception as e:
+        logger.error(f"Throughput test error: {e}")
+        handler.serve_json({'error': 'Test failed', 'status': 'failed'})
+
+
+@agent_router.route('POST', '/api/network/udp-test')
+def handle_network_udp_test(handler):
+    try:
+        from atlas.network.monitors import get_udp_quality_monitor
+        body = handler._read_body()
+        if body is None:
+            return
+        body = body if body else b'{}'
+        data = json.loads(body.decode('utf-8'))
+        target_host = data.get('target_host', '8.8.8.8')
+        target_port = data.get('target_port', 5005)
+        monitor = get_udp_quality_monitor(target_host, target_port)
+        result = monitor.run_single_test()
+        handler.serve_json(result)
+    except Exception as e:
+        logger.error(f"UDP test error: {e}")
+        handler.serve_json({'error': 'Test failed', 'status': 'failed'})
+
+
+# ==================== Alert Rules (POST) ====================
+# NOTE: /api/alerts/rules/reset registered before /api/alerts/rules/{rule_id}/...
+
+@agent_router.route('POST', '/api/alerts/rules')
+def handle_alerts_rules_create(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    rule_data = json.loads(body.decode('utf-8'))
+    manager = get_alert_rules_manager()
+    success, message, rule = manager.create_rule(rule_data)
+    if success:
         handler.serve_json({
             'status': 'success',
-            'fingerprint': fingerprint,
-            'alias': alias
+            'message': message,
+            'rule': rule.to_dict()
         })
-
-    elif path == '/api/wifi/alias/remove':
-        from atlas.wifi_analyzer import get_network_alias_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        fingerprint = data.get('fingerprint', '')
-        if not fingerprint:
-            manager = get_network_alias_manager()
-            fingerprint = manager.get_current_fingerprint()
-        if not fingerprint:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': 'No fingerprint provided'}).encode())
-            return True
-        manager = get_network_alias_manager()
-        success = manager.remove_alias(fingerprint)
-        handler.serve_json({
-            'status': 'success' if success else 'not_found',
-            'fingerprint': fingerprint
-        })
-
-    # ==================== Network Testing ====================
-
-    elif path == '/api/network/connection-test':
-        try:
-            from atlas.network.monitors import get_tcp_connection_tester
-            body = handler._read_body()
-            if body is None:
-                return True
-            body = body if body else b'{}'
-            json.loads(body.decode('utf-8'))
-            tester = get_tcp_connection_tester()
-            result = tester.run_single_test()
-            handler.serve_json(result)
-        except Exception as e:
-            logger.error(f"Connection test error: {e}")
-            handler.serve_json({'error': 'Test failed', 'status': 'failed'})
-
-    elif path == '/api/network/throughput-test':
-        try:
-            from atlas.network.monitors import get_throughput_tester
-            body = handler._read_body()
-            if body is None:
-                return True
-            body = body if body else b'{}'
-            data = json.loads(body.decode('utf-8'))
-            server_host = data.get('server_host')
-            server_port = data.get('server_port', 5007)
-            duration = data.get('duration', 5)
-            if not server_host:
-                handler.serve_json({'error': 'server_host is required', 'status': 'failed'})
-                return True
-            tester = get_throughput_tester(server_host)
-            tester.set_server(server_host, server_port)
-            tester.test_duration = duration
-            result = tester.run_full_test()
-            handler.serve_json(result)
-        except Exception as e:
-            logger.error(f"Throughput test error: {e}")
-            handler.serve_json({'error': 'Test failed', 'status': 'failed'})
-
-    elif path == '/api/network/udp-test':
-        try:
-            from atlas.network.monitors import get_udp_quality_monitor
-            body = handler._read_body()
-            if body is None:
-                return True
-            body = body if body else b'{}'
-            data = json.loads(body.decode('utf-8'))
-            target_host = data.get('target_host', '8.8.8.8')
-            target_port = data.get('target_port', 5005)
-            monitor = get_udp_quality_monitor(target_host, target_port)
-            result = monitor.run_single_test()
-            handler.serve_json(result)
-        except Exception as e:
-            logger.error(f"UDP test error: {e}")
-            handler.serve_json({'error': 'Test failed', 'status': 'failed'})
-
-    # ==================== Alert Rules (POST) ====================
-
-    elif path == '/api/alerts/rules':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        rule_data = json.loads(body.decode('utf-8'))
-        manager = get_alert_rules_manager()
-        success, message, rule = manager.create_rule(rule_data)
-        if success:
-            handler.serve_json({
-                'status': 'success',
-                'message': message,
-                'rule': rule.to_dict()
-            })
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path.startswith('/api/alerts/rules/') and path.endswith('/update'):
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        rule_id = path.replace('/api/alerts/rules/', '').replace('/update', '')
-        body = handler._read_body()
-        if body is None:
-            return True
-        updates = json.loads(body.decode('utf-8'))
-        manager = get_alert_rules_manager()
-        success, message = manager.update_rule(rule_id, updates)
-        if success:
-            rule = manager.get_rule(rule_id)
-            handler.serve_json({
-                'status': 'success',
-                'message': message,
-                'rule': rule.to_dict() if rule else None
-            })
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path.startswith('/api/alerts/rules/') and path.endswith('/delete'):
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        rule_id = path.replace('/api/alerts/rules/', '').replace('/delete', '')
-        manager = get_alert_rules_manager()
-        success, message = manager.delete_rule(rule_id)
-        if success:
-            handler.serve_json({'status': 'success', 'message': message})
-        else:
-            handler.send_response(404)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path.startswith('/api/alerts/rules/') and path.endswith('/toggle'):
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        rule_id = path.replace('/api/alerts/rules/', '').replace('/toggle', '')
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        enabled = data.get('enabled', True)
-        manager = get_alert_rules_manager()
-        success, message = manager.toggle_rule(rule_id, enabled)
-        if success:
-            rule = manager.get_rule(rule_id)
-            handler.serve_json({
-                'status': 'success',
-                'message': message,
-                'rule': rule.to_dict() if rule else None
-            })
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path == '/api/alerts/rules/reset':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        manager = get_alert_rules_manager()
-        success, message = manager.reset_to_defaults()
-        if success:
-            rules = manager.list_rules()
-            handler.serve_json({
-                'status': 'success',
-                'message': message,
-                'rules': [r.to_dict() for r in rules]
-            })
-        else:
-            handler.send_response(500)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path.startswith('/api/alerts/events/') and path.endswith('/acknowledge'):
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        event_id = path.replace('/api/alerts/events/', '').replace('/acknowledge', '')
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        acknowledged_by = data.get('acknowledged_by', 'user')
-        manager = get_alert_rules_manager()
-        success, message = manager.acknowledge_event(event_id, acknowledged_by)
-        if success:
-            handler.serve_json({'status': 'success', 'message': message})
-        else:
-            handler.send_response(404)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path == '/api/alerts/email-config':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        config = json.loads(body.decode('utf-8'))
-        manager = get_alert_rules_manager()
-        success, message = manager.configure_email(config)
-        if success:
-            handler.serve_json({'status': 'success', 'message': message})
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path == '/api/alerts/email-test':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8'))
-        recipient = data.get('recipient')
-        if not recipient:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': 'recipient is required'}).encode())
-            return True
-        manager = get_alert_rules_manager()
-        success, message = manager.test_email(recipient)
-        if success:
-            handler.serve_json({'status': 'success', 'message': message})
-        else:
-            handler.send_response(400)
-            handler.send_header('Content-type', 'application/json')
-            handler.end_headers()
-            handler.wfile.write(json.dumps({'error': message}).encode())
-
-    elif path == '/api/alerts/evaluate':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        metrics = json.loads(body.decode('utf-8')) if body else {}
-        if not metrics:
-            current = handler.get_current_stats()
-            metrics = {
-                'cpu': current.get('cpu', 0),
-                'memory': current.get('memory', 0),
-                'disk': current.get('disk', 0),
-                'temperature': current.get('temperature', 0),
-                'battery': current.get('battery', 0),
-                'network_up': current.get('network_up', 0),
-                'network_down': current.get('network_down', 0),
-            }
-        manager = get_alert_rules_manager()
-        events = manager.evaluate_metrics(metrics)
-        handler.serve_json({
-            'status': 'success',
-            'metrics_evaluated': metrics,
-            'triggered_events': [e.to_dict() for e in events],
-            'count': len(events)
-        })
-
-    elif path == '/api/alerts/cleanup':
-        from atlas.alert_rules_manager import get_alert_rules_manager
-        body = handler._read_body()
-        if body is None:
-            return True
-        data = json.loads(body.decode('utf-8')) if body else {}
-        days = int(data.get('days', 30))
-        manager = get_alert_rules_manager()
-        deleted = manager.cleanup_old_events(days)
-        handler.serve_json({
-            'status': 'success',
-            'deleted_count': deleted,
-            'message': f'Deleted {deleted} events older than {days} days'
-        })
-
-    # ==================== Encrypted Export ====================
-
-    elif path.startswith('/api/ping/export'):
-        _handle_encrypted_export(handler, 'ping')
-
-    elif path.startswith('/api/speedtest/export'):
-        _handle_encrypted_export(handler, 'speedtest')
-
-    elif path.startswith('/api/wifi/events/export'):
-        _handle_encrypted_export(handler, 'wifi_events')
-
-    elif path.startswith('/api/wifi/export'):
-        _handle_encrypted_export(handler, 'wifi')
-
-    # ==================== OSI Layers Diagnostic ====================
-
-    elif path == '/api/osi-layers/test':
-        from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
-        from dataclasses import asdict
-        monitor = get_osi_diagnostic_monitor()
-        result = monitor.run_diagnostic()
-        result_dict = asdict(result)
-        monitor.update_last_result(result_dict)
-        handler.serve_json({'status': 'success', 'result': result_dict})
-
-    elif path == '/api/osi-layers/network-quality':
-        _handle_network_quality(handler)
-
-    elif path == '/api/osi-layers/custom-scan':
-        _handle_custom_scan(handler)
-
     else:
-        return False
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
 
-    return True
+
+@agent_router.route('POST', '/api/alerts/rules/reset')
+def handle_alerts_rules_reset(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    manager = get_alert_rules_manager()
+    success, message = manager.reset_to_defaults()
+    if success:
+        rules = manager.list_rules()
+        handler.serve_json({
+            'status': 'success',
+            'message': message,
+            'rules': [r.to_dict() for r in rules]
+        })
+    else:
+        handler.send_response(500)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/rules/{rule_id}/update')
+def handle_alerts_rule_update(handler, rule_id):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    updates = json.loads(body.decode('utf-8'))
+    manager = get_alert_rules_manager()
+    success, message = manager.update_rule(rule_id, updates)
+    if success:
+        rule = manager.get_rule(rule_id)
+        handler.serve_json({
+            'status': 'success',
+            'message': message,
+            'rule': rule.to_dict() if rule else None
+        })
+    else:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/rules/{rule_id}/delete')
+def handle_alerts_rule_delete(handler, rule_id):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    manager = get_alert_rules_manager()
+    success, message = manager.delete_rule(rule_id)
+    if success:
+        handler.serve_json({'status': 'success', 'message': message})
+    else:
+        handler.send_response(404)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/rules/{rule_id}/toggle')
+def handle_alerts_rule_toggle(handler, rule_id):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    enabled = data.get('enabled', True)
+    manager = get_alert_rules_manager()
+    success, message = manager.toggle_rule(rule_id, enabled)
+    if success:
+        rule = manager.get_rule(rule_id)
+        handler.serve_json({
+            'status': 'success',
+            'message': message,
+            'rule': rule.to_dict() if rule else None
+        })
+    else:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/events/{event_id}/acknowledge')
+def handle_alerts_event_acknowledge(handler, event_id):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    acknowledged_by = data.get('acknowledged_by', 'user')
+    manager = get_alert_rules_manager()
+    success, message = manager.acknowledge_event(event_id, acknowledged_by)
+    if success:
+        handler.serve_json({'status': 'success', 'message': message})
+    else:
+        handler.send_response(404)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/email-config')
+def handle_alerts_email_config_post(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    config = json.loads(body.decode('utf-8'))
+    manager = get_alert_rules_manager()
+    success, message = manager.configure_email(config)
+    if success:
+        handler.serve_json({'status': 'success', 'message': message})
+    else:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/email-test')
+def handle_alerts_email_test(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8'))
+    recipient = data.get('recipient')
+    if not recipient:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': 'recipient is required'}).encode())
+        return
+    manager = get_alert_rules_manager()
+    success, message = manager.test_email(recipient)
+    if success:
+        handler.serve_json({'status': 'success', 'message': message})
+    else:
+        handler.send_response(400)
+        handler.send_header('Content-type', 'application/json')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': message}).encode())
+
+
+@agent_router.route('POST', '/api/alerts/evaluate')
+def handle_alerts_evaluate(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    metrics = json.loads(body.decode('utf-8')) if body else {}
+    if not metrics:
+        current = handler.get_current_stats()
+        metrics = {
+            'cpu': current.get('cpu', 0),
+            'memory': current.get('memory', 0),
+            'disk': current.get('disk', 0),
+            'temperature': current.get('temperature', 0),
+            'battery': current.get('battery', 0),
+            'network_up': current.get('network_up', 0),
+            'network_down': current.get('network_down', 0),
+        }
+    manager = get_alert_rules_manager()
+    events = manager.evaluate_metrics(metrics)
+    handler.serve_json({
+        'status': 'success',
+        'metrics_evaluated': metrics,
+        'triggered_events': [e.to_dict() for e in events],
+        'count': len(events)
+    })
+
+
+@agent_router.route('POST', '/api/alerts/cleanup')
+def handle_alerts_cleanup(handler):
+    from atlas.alert_rules_manager import get_alert_rules_manager
+    body = handler._read_body()
+    if body is None:
+        return
+    data = json.loads(body.decode('utf-8')) if body else {}
+    days = safe_int_param(data, 'days', 30, max_val=365) if isinstance(data.get('days'), list) else min(int(data.get('days', 30)), 365)
+    manager = get_alert_rules_manager()
+    deleted = manager.cleanup_old_events(days)
+    handler.serve_json({
+        'status': 'success',
+        'deleted_count': deleted,
+        'message': f'Deleted {deleted} events older than {days} days'
+    })
+
+
+# ==================== Encrypted Export (POST) ====================
+# NOTE: /api/wifi/events/export registered before /api/wifi/export
+
+@agent_router.route('POST', '/api/ping/export')
+def handle_ping_export_post(handler):
+    _handle_encrypted_export(handler, 'ping')
+
+
+@agent_router.route('POST', '/api/speedtest/export')
+def handle_speedtest_export_post(handler):
+    _handle_encrypted_export(handler, 'speedtest')
+
+
+@agent_router.route('POST', '/api/wifi/events/export')
+def handle_wifi_events_export_post(handler):
+    _handle_encrypted_export(handler, 'wifi_events')
+
+
+@agent_router.route('POST', '/api/wifi/export')
+def handle_wifi_export_post(handler):
+    _handle_encrypted_export(handler, 'wifi')
+
+
+# ==================== OSI Layers Diagnostic (POST) ====================
+
+@agent_router.route('POST', '/api/osi-layers/test')
+def handle_osi_layers_test(handler):
+    from atlas.network.monitors.osi_diagnostic_monitor import get_osi_diagnostic_monitor
+    from dataclasses import asdict
+    monitor = get_osi_diagnostic_monitor()
+    result = monitor.run_diagnostic()
+    result_dict = asdict(result)
+    monitor.update_last_result(result_dict)
+    handler.serve_json({'status': 'success', 'result': result_dict})
+
+
+@agent_router.route('POST', '/api/osi-layers/network-quality')
+def handle_osi_layers_network_quality(handler):
+    _handle_network_quality(handler)
+
+
+@agent_router.route('POST', '/api/osi-layers/custom-scan')
+def handle_osi_layers_custom_scan(handler):
+    _handle_custom_scan(handler)
 
 
 # ==================== Complex Handler Helpers ====================
@@ -1909,3 +2102,34 @@ def _handle_custom_scan(handler):
     except Exception as e:
         logger.error(f"Custom scan error: {e}")
         handler.serve_json({'error': str(e), 'status': 'error'})
+
+
+# ==================== Backward-compatible dispatch ====================
+
+def dispatch_get(handler, path):
+    """Handle GET requests for API data endpoints.
+
+    Args:
+        handler: LiveWidgetHandler instance
+        path: URL path (without query string)
+
+    Returns:
+        True if the request was handled, False otherwise
+    """
+    return agent_router.dispatch_get(handler, path)
+
+
+def dispatch_post(handler, path):
+    """Handle POST requests for API endpoints.
+
+    Note: Auth POST routes (/login, /api/auth/*) are handled inline
+    in LiveWidgetHandler.do_POST since they run before the auth check.
+
+    Args:
+        handler: LiveWidgetHandler instance
+        path: URL path (without query string)
+
+    Returns:
+        True if the request was handled, False otherwise
+    """
+    return agent_router.dispatch_post(handler, path)

@@ -1,0 +1,2615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Widget Dashboard - ATLAS Agent</title>
+<style>
+    /* ========================================
+       CSS Custom Properties - Design System
+       ======================================== */
+$design_tokens
+
+    /* ========================================
+       Base Styles
+       ======================================== */
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        background: var(--color-bg);
+        color: var(--color-text-primary);
+        font-family: var(--font-system);
+        font-size: var(--text-base);
+        line-height: 1.5;
+        padding: var(--space-7);
+        min-height: 100vh;
+        position: relative;
+        overflow-x: hidden;
+    }
+
+    /* Ambient Mesh Gradient Background (Phase 2) */
+    body::before {
+        content: '';
+        position: fixed;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background:
+            radial-gradient(circle at 20% 50%, rgba(0, 229, 160, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(0, 200, 255, 0.06) 0%, transparent 50%);
+        filter: blur(60px);
+        opacity: 0.6;
+        z-index: -1;
+        animation: mesh-float 30s ease-in-out infinite;
+        will-change: transform;
+        pointer-events: none;
+    }
+
+    @keyframes mesh-float {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33% { transform: translate(30px, -30px) scale(1.1); }
+        66% { transform: translate(-20px, 20px) scale(0.9); }
+    }
+
+    /* Typography (Phase 2) */
+    h1 {
+        color: var(--color-accent);
+        font-size: var(--text-3xl);
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        margin-bottom: 20px;
+        text-align: center;
+        background: linear-gradient(135deg, var(--color-accent), var(--color-secondary));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    /* ========================================
+       Header & Navigation
+       ======================================== */
+    .header-container {
+        max-width: 1600px;
+        margin: 0 auto var(--space-8);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+        gap: var(--space-6);
+    }
+
+    /* E2EE Status Badge */
+    .e2ee-badge {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        background: var(--color-bg-surface);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-medium);
+        transition: border-color var(--transition-base);
+    }
+    .e2ee-badge .e2ee-icon {
+        font-size: 18px;
+    }
+    .e2ee-badge .e2ee-label {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }
+
+    /* Live Status Bar */
+    .status-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-6);
+        padding: var(--space-2) var(--space-5);
+        background: var(--color-bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        max-width: 1600px;
+        margin: 0 auto var(--space-6);
+        font-size: var(--text-xs);
+        color: var(--color-text-secondary);
+        overflow-x: auto;
+    }
+    .status-bar .status-metric {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        white-space: nowrap;
+    }
+    .status-bar .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-success);
+        flex-shrink: 0;
+    }
+    .status-bar .status-dot.warn {
+        background: var(--color-warning);
+    }
+    .status-bar .status-dot.error {
+        background: var(--color-error);
+    }
+    .status-bar .status-value {
+        color: var(--color-text-primary);
+        font-weight: 600;
+        font-family: var(--font-mono);
+    }
+    .status-bar .status-divider {
+        width: 1px;
+        height: 16px;
+        background: var(--border-medium);
+        flex-shrink: 0;
+    }
+
+    /* Header Branding */
+    .header-branding {
+        text-align: center;
+    }
+    .header-branding h1 {
+        margin: 0;
+    }
+    .header-subtitle {
+        color: var(--color-text-tertiary);
+        font-size: var(--text-sm);
+        margin-top: var(--space-1);
+        letter-spacing: 0.3px;
+    }
+
+    /* Glassmorphic Hamburger Menu (Phase 1) */
+    .hamburger {
+        width: 44px;
+        height: 44px;
+        background: var(--color-bg-glass);
+        backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid var(--border-medium);
+        border-radius: 12px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 5px;
+        transition: all var(--transition-base);
+        box-shadow: var(--shadow-sm),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .hamburger:hover {
+        background: var(--color-accent-dim);
+        border-color: var(--border-accent);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md), var(--shadow-glow);
+    }
+
+    .hamburger span {
+        width: 20px;
+        height: 2px;
+        background: var(--color-accent);
+        border-radius: 2px;
+        transition: all var(--transition-base);
+    }
+
+    .hamburger:hover span {
+        background: var(--color-accent-hover);
+    }
+    .hamburger.active span:nth-child(1) {
+        transform: rotate(45deg) translate(6px, 6px);
+    }
+    .hamburger.active span:nth-child(2) {
+        opacity: 0;
+    }
+    .hamburger.active span:nth-child(3) {
+        transform: rotate(-45deg) translate(6px, -6px);
+    }
+    /* Glassmorphic Menu (Phase 1) */
+    .menu {
+        position: absolute;
+        top: 56px;
+        right: 0;
+        background: var(--color-bg-glass);
+        backdrop-filter: blur(40px) saturate(180%);
+        border: 1px solid var(--border-medium);
+        border-radius: 16px;
+        padding: 12px;
+        min-width: 280px;
+        display: none;
+        z-index: 1000;
+        box-shadow: var(--shadow-lg),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        animation: menuSlideIn var(--transition-base);
+    }
+
+    @keyframes menuSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .submenu {
+        position: absolute;
+        right: 100%;
+        top: 0;
+        background: var(--color-bg-glass);
+        backdrop-filter: blur(40px) saturate(180%);
+        border: 1px solid var(--border-medium);
+        border-radius: 16px;
+        padding: 12px;
+        min-width: 280px;
+        max-height: 80vh;
+        overflow-y: auto;
+        display: none;
+        margin-right: 12px;
+        box-shadow: var(--shadow-lg),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+    .submenu.active {
+        display: block;
+    }
+    .submenu::-webkit-scrollbar {
+        width: 6px;
+    }
+    .submenu::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+    }
+    .submenu::-webkit-scrollbar-thumb {
+        background: var(--color-accent);
+        border-radius: 8px;
+    }
+    .submenu::-webkit-scrollbar-thumb:hover {
+        background: var(--color-accent-hover);
+    }
+
+    .menu.active {
+        display: block;
+    }
+
+    .menu-section {
+        margin-bottom: 16px;
+    }
+    .menu-section:last-child {
+        margin-bottom: 0;
+    }
+
+    .menu-title {
+        color: var(--color-accent);
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .menu-item {
+        padding: 12px 16px;
+        cursor: pointer;
+        border-radius: 10px;
+        transition: all var(--transition-base);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+        font-size: var(--text-sm);
+        color: var(--color-text-primary);
+    }
+
+    .menu-item:hover {
+        background: var(--color-accent-dim);
+        color: var(--color-accent);
+        transform: translateX(-2px);
+    }
+
+    .menu-item.has-submenu::before {
+        content: '‹';
+        font-size: 20px;
+        margin-right: 10px;
+        opacity: 0.6;
+    }
+
+    .menu-item.active {
+        background: var(--color-accent);
+        color: var(--color-bg);
+        font-weight: 600;
+    }
+
+    .theme-preview {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        border: 1px solid var(--border-medium);
+        box-shadow: var(--shadow-sm);
+    }
+    /* ========================================
+       Dashboard Grid — Bento Layout
+       ======================================== */
+    .dashboard {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: var(--space-6);
+        max-width: 1600px;
+        margin: 0 auto;
+    }
+
+    /* Default grid column span */
+    .dashboard > iframe,
+    .dashboard > .widget-iframe-container {
+        grid-column: span 4;
+    }
+
+    .dashboard > .stacked-container {
+        grid-column: span 4;
+    }
+
+    /* Bento card sizes */
+    .widget-span-1 {
+        grid-column: span 4 !important;
+    }
+
+    .widget-span-2 {
+        grid-column: span 8 !important;
+    }
+
+    .widget-full-width {
+        grid-column: 1 / -1 !important;
+    }
+
+    /* Bento-style: first two widgets are wider for visual hierarchy */
+    .dashboard > iframe:first-child,
+    .dashboard > .widget-iframe-container:first-child {
+        grid-column: span 8;
+    }
+    .dashboard > iframe:first-child,
+    .dashboard > .widget-iframe-container:first-child {
+        min-height: 420px;
+    }
+
+    /* Widget card label overlay */
+    .widget-iframe-container {
+        position: relative;
+    }
+    .widget-iframe-container::before {
+        content: attr(data-widget-name);
+        position: absolute;
+        top: var(--space-3);
+        left: var(--space-4);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--color-text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        z-index: 2;
+        background: var(--color-bg-surface);
+        padding: 2px 10px;
+        border-radius: var(--radius-sm);
+        opacity: 0;
+        transition: opacity var(--transition-base);
+        pointer-events: none;
+    }
+    .widget-iframe-container:hover::before {
+        opacity: 1;
+    }
+
+    /* Widget iframe containers with loading overlays */
+    .widget-iframe-container {
+        position: relative;
+    }
+
+    .iframe-loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-3);
+        background: var(--color-bg-elevated);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-medium);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+        z-index: 1;
+        transition: opacity var(--transition-base);
+    }
+
+    .iframe-loading-overlay .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid var(--border-medium);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .iframe-loaded .iframe-loading-overlay {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* Widget containers */
+    .widget-container {
+        position: relative;
+    }
+
+    .widget-iframe-container iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: var(--radius-lg);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--border-medium);
+        box-shadow: var(--shadow-card);
+        transition: transform var(--transition-base),
+                    box-shadow var(--transition-base),
+                    border-color var(--transition-base);
+    }
+
+    iframe {
+        width: 100%;
+        height: 300px;
+        border: none;
+        border-radius: var(--radius-lg);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--border-medium);
+        box-shadow: var(--shadow-card);
+        transition: transform var(--transition-base),
+                    box-shadow var(--transition-base),
+                    border-color var(--transition-base);
+    }
+
+    iframe:hover {
+        transform: scale(1.008);
+        box-shadow: var(--shadow-lg),
+                    0 8px 32px rgba(0, 229, 160, 0.08);
+        border-color: var(--border-accent);
+    }
+
+    .stacked-container {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-6);
+        grid-column: span 4;
+    }
+
+    .stacked-container iframe {
+        width: 100%;
+    }
+
+    /* Info Cards */
+    .info {
+        margin: var(--space-6) auto;
+        max-width: 1600px;
+        padding: var(--space-6) var(--space-7);
+        background: var(--glass-bg);
+        backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--border-medium);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-card);
+    }
+
+    .info h3 {
+        color: var(--color-accent);
+        font-size: var(--text-lg);
+        font-weight: 600;
+        margin-bottom: 12px;
+    }
+
+    .info p {
+        max-width: 70ch;
+        line-height: 1.6;
+    }
+
+    .info code {
+        background: rgba(0, 0, 0, 0.4);
+        padding: 3px 8px;
+        border-radius: 6px;
+        color: var(--color-secondary);
+        font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+        font-size: var(--text-sm);
+    }
+
+    /* ========================================
+       Footer
+       ======================================== */
+    .footer-summary {
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+    .footer-title {
+        margin: 0;
+        display: inline;
+    }
+    .footer-hint {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }
+    .footer-grid {
+        margin-top: var(--space-4);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: var(--space-4);
+    }
+    .footer-section-title {
+        font-size: var(--text-sm);
+        margin-bottom: var(--space-2);
+    }
+
+    /* ========================================
+       Global Focus & Interaction States
+       ======================================== */
+    :focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+        border-radius: 4px;
+    }
+
+    button:focus-visible,
+    .menu-item:focus-visible,
+    .export-option:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+
+    /* Details/Summary disclosure (footer) */
+    details summary {
+        list-style: none;
+    }
+    details summary::-webkit-details-marker {
+        display: none;
+    }
+    details[open] summary span {
+        display: none;
+    }
+
+    /* ========================================
+       Responsive Design — Automatic Breakpoints
+       ======================================== */
+
+    /* --- Large Desktop (≤1400px) --- */
+    @media (max-width: 1400px) {
+        .dashboard > iframe,
+        .dashboard > .widget-iframe-container {
+            grid-column: span 6;
+        }
+        .dashboard > .stacked-container {
+            grid-column: span 6;
+        }
+        .widget-span-1 {
+            grid-column: span 6 !important;
+        }
+        .widget-span-2 {
+            grid-column: span 12 !important;
+        }
+    }
+
+    /* --- Tablet (≤768px) --- */
+    @media (max-width: 768px) {
+        body {
+            padding: var(--space-3);
+        }
+
+        .status-bar {
+            gap: var(--space-3);
+            padding: var(--space-2) var(--space-3);
+            font-size: 10px;
+        }
+
+        .dashboard {
+            grid-template-columns: 1fr;
+            gap: var(--space-4);
+        }
+
+        /* Reset bento first-child override on tablet */
+        .dashboard > iframe:first-child,
+        .dashboard > .widget-iframe-container:first-child {
+            grid-column: 1 / -1;
+            min-height: 350px;
+        }
+
+        .dashboard > iframe,
+        .dashboard > .widget-iframe-container,
+        .dashboard > .stacked-container {
+            grid-column: 1 / -1;
+        }
+
+        .widget-span-1,
+        .widget-span-2,
+        .widget-full-width {
+            grid-column: 1 / -1 !important;
+        }
+
+        .widget-iframe-container, iframe {
+            height: auto !important;
+            min-height: 350px;
+            max-height: 80vh;
+        }
+
+        /* Header: stack title center, controls at edges */
+        .header-container {
+            flex-wrap: wrap;
+            gap: var(--space-3);
+            margin-bottom: var(--space-5);
+        }
+
+        h1 {
+            font-size: var(--text-2xl);
+        }
+
+        .header-container > .e2ee-badge {
+            order: 2;
+        }
+        .header-container > .header-branding {
+            order: 1;
+            flex-basis: 100%;
+            text-align: center;
+        }
+        .header-container > button.hamburger {
+            order: 3;
+        }
+
+        /* Menu: full-width dropdown */
+        .menu {
+            right: 0;
+            left: 0;
+            min-width: unset;
+            border-radius: 12px;
+        }
+
+        /* Submenus: inline instead of fly-out */
+        .submenu {
+            position: static;
+            margin-right: 0;
+            margin-top: 4px;
+            border: none;
+            border-left: 2px solid var(--border-accent);
+            border-radius: 0;
+            padding: 4px 0 4px 8px;
+            box-shadow: none;
+            backdrop-filter: none;
+            background: transparent;
+        }
+
+        /* Info section: more compact */
+        .info {
+            padding: 16px;
+        }
+        .info p {
+            font-size: var(--text-sm);
+            line-height: 1.6;
+        }
+
+        /* Toasts: smaller width */
+        .toast {
+            min-width: unset;
+            max-width: calc(100vw - 48px);
+        }
+        .toast-container {
+            right: 12px;
+            left: 12px;
+        }
+
+        /* Export dialog: smaller padding */
+        .export-content {
+            padding: 24px;
+            max-width: 95vw;
+        }
+
+        /* No hover effects on touch devices */
+        iframe:hover {
+            transform: none;
+            box-shadow: var(--shadow-md),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border-color: var(--border-medium);
+        }
+
+        /* Border radius reduction */
+        iframe,
+        .widget-iframe-container iframe {
+            border-radius: 14px;
+        }
+
+        .iframe-loading-overlay {
+            border-radius: 14px;
+        }
+    }
+
+    /* --- Mobile (≤480px) --- */
+    @media (max-width: 480px) {
+        body {
+            padding: var(--space-2);
+        }
+
+        .dashboard {
+            gap: var(--space-3);
+        }
+
+        .widget-iframe-container, iframe {
+            min-height: 280px;
+            max-height: 70vh;
+        }
+
+        /* Hide status bar on mobile */
+        .status-bar {
+            display: none;
+        }
+
+        /* Header: compact single-line */
+        .header-container {
+            gap: var(--space-2);
+            margin-bottom: var(--space-3);
+        }
+
+        h1 {
+            font-size: var(--text-xl);
+            margin-bottom: var(--space-1);
+        }
+
+        /* Hide subtitle on mobile */
+        .header-subtitle {
+            display: none;
+        }
+
+        /* E2EE status: icon only */
+        .e2ee-badge {
+            padding: var(--space-1) var(--space-2) !important;
+        }
+        .e2ee-label {
+            display: none !important;
+        }
+
+        /* Hamburger: slightly smaller */
+        .hamburger {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+        }
+
+        /* Menu: full-screen overlay */
+        .menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 0;
+            padding: 60px var(--space-4) var(--space-4);
+            overflow-y: auto;
+            z-index: 2000;
+            background: rgba(12, 12, 20, 0.98);
+            backdrop-filter: blur(40px);
+        }
+
+        /* Menu close area (hamburger stays on top) */
+        .menu.active ~ .hamburger,
+        .hamburger {
+            z-index: 2001;
+        }
+
+        .menu-item {
+            padding: 14px 16px;
+            font-size: var(--text-base);
+        }
+
+        /* Toasts: full-width */
+        .toast-container {
+            top: 8px;
+            right: 8px;
+            left: 8px;
+        }
+        .toast {
+            max-width: 100%;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: var(--text-sm);
+        }
+
+        /* Export dialog: full-screen-ish */
+        .export-content {
+            width: 95vw;
+            padding: 20px;
+            border-radius: 14px;
+        }
+        .export-options {
+            flex-direction: column;
+            gap: 10px;
+        }
+        .export-option {
+            padding: 14px;
+        }
+
+        /* Widget settings: mobile-friendly */
+        .widget-settings-panel {
+            width: 100vw;
+            max-width: 100vw;
+            max-height: 100vh;
+            border-radius: 0;
+        }
+
+        /* Info section: collapse to summary */
+        .info {
+            padding: 12px;
+            font-size: var(--text-xs);
+        }
+        .info h3 {
+            font-size: var(--text-sm);
+        }
+        .info code {
+            font-size: var(--text-xs);
+            padding: 2px 4px;
+        }
+
+        /* Reduce border radius globally */
+        iframe,
+        .widget-iframe-container iframe {
+            border-radius: 10px;
+        }
+        .iframe-loading-overlay {
+            border-radius: 10px;
+        }
+        .info {
+            border-radius: 10px;
+        }
+
+        /* Reduce ambient background intensity */
+        body::before {
+            opacity: 0.3;
+            animation: none;
+        }
+
+        /* Offline banner: compact */
+        .offline-banner {
+            padding: 8px 12px;
+            font-size: var(--text-xs);
+            border-radius: 8px;
+        }
+    }
+
+    /* --- Small Phones (≤360px) --- */
+    @media (max-width: 360px) {
+        body {
+            padding: var(--space-1);
+        }
+        .dashboard {
+            gap: var(--space-2);
+        }
+        h1 {
+            font-size: var(--text-lg);
+        }
+        .widget-iframe-container, iframe {
+            min-height: 240px;
+            max-height: 65vh;
+            border-radius: 8px;
+        }
+        .iframe-loading-overlay {
+            border-radius: 8px;
+        }
+    }
+
+    /* --- Touch Device Hover Override --- */
+    @media (hover: none) and (pointer: coarse) {
+        iframe:hover {
+            transform: none !important;
+            box-shadow: var(--shadow-md),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+            border-color: var(--border-medium) !important;
+        }
+        .menu-item:hover {
+            transform: none;
+        }
+        .hamburger:hover {
+            transform: none;
+        }
+    }
+
+    /* --- Landscape Mobile --- */
+    @media (max-height: 500px) and (orientation: landscape) {
+        .widget-iframe-container, iframe {
+            min-height: 200px;
+            max-height: 90vh;
+        }
+        .menu {
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+    }
+    /* ========================================
+       Accessibility & UI Elements (Phase 1)
+       ======================================== */
+    .skip-link {
+        position: absolute;
+        top: -100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--color-accent);
+        color: var(--color-bg);
+        padding: 10px 20px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: var(--text-sm);
+        z-index: 10000;
+        transition: top var(--transition-fast);
+        text-decoration: none;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .skip-link:focus {
+        top: 20px;
+        outline: 2px solid var(--color-accent);
+        outline-offset: 4px;
+    }
+
+    /* Skeleton Loaders (Phase 2) */
+    @keyframes shimmer {
+        0% { background-position: -1000px 0; }
+        100% { background-position: 1000px 0; }
+    }
+
+    .skeleton-loader {
+        background: linear-gradient(
+            90deg,
+            rgba(255,255,255,0.03) 25%,
+            rgba(255,255,255,0.06) 50%,
+            rgba(255,255,255,0.03) 75%
+        );
+        background-size: 1000px 100%;
+        animation: shimmer 2s infinite;
+        border-radius: 8px;
+    }
+
+    .skeleton-text {
+        height: 12px;
+        margin: 8px 0;
+    }
+
+    .skeleton-title {
+        height: 20px;
+        width: 60%;
+        margin-bottom: 16px;
+    }
+
+    /* ========================================
+       Toast Notification System (Phase 1 + 3)
+       ======================================== */
+    .toast-container {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        z-index: 2000;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        pointer-events: none;
+    }
+
+    .toast {
+        background: var(--color-bg-glass);
+        backdrop-filter: blur(20px) saturate(180%);
+        border-radius: 12px;
+        padding: 16px 20px;
+        box-shadow: var(--shadow-lg),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 300px;
+        max-width: 420px;
+        pointer-events: auto;
+        animation: toastSlideIn var(--transition-slow), fadeOut var(--transition-slow) 2.7s forwards;
+        border: 1px solid var(--border-medium);
+        border-left-width: 3px;
+    }
+
+    .toast-success { border-left-color: var(--color-success); }
+    .toast-error { border-left-color: var(--color-error); }
+    .toast-warning { border-left-color: var(--color-warning); }
+    .toast-info { border-left-color: var(--color-secondary); }
+
+    .toast-icon {
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .toast-message {
+        flex: 1;
+        font-size: var(--text-sm);
+        color: var(--color-text-primary);
+        line-height: 1.4;
+    }
+
+    .toast-close {
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        padding: 4px;
+        font-size: 18px;
+        line-height: 1;
+        border-radius: 6px;
+        transition: all var(--transition-fast);
+    }
+
+    .toast-close:hover {
+        color: var(--color-text-primary);
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    @keyframes toastSlideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes fadeOut {
+        to {
+            opacity: 0;
+            transform: translateX(50%);
+        }
+    }
+
+    /* ========================================
+       Export Format Dialog (Phase 1)
+       ======================================== */
+    .export-dialog {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn var(--transition-base);
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    .export-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(8px);
+    }
+
+    .export-content {
+        position: relative;
+        background: var(--color-bg-glass);
+        backdrop-filter: blur(40px) saturate(180%);
+        border-radius: 20px;
+        padding: 32px;
+        max-width: 460px;
+        width: 90%;
+        box-shadow: var(--shadow-lg),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--border-medium);
+        animation: dialogSlideUp var(--transition-slow);
+    }
+
+    @keyframes dialogSlideUp {
+        from {
+            opacity: 0;
+            transform: translateY(32px) scale(0.96);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+
+    .export-title {
+        font-size: var(--text-xl);
+        font-weight: 700;
+        color: var(--color-accent);
+        margin-bottom: 16px;
+        letter-spacing: -0.3px;
+    }
+
+    .export-message {
+        font-size: var(--text-base);
+        color: var(--color-text-secondary);
+        margin-bottom: 24px;
+        line-height: 1.6;
+    }
+    .export-options {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 28px;
+    }
+
+    .export-option {
+        flex: 1;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-medium);
+        border-radius: 14px;
+        cursor: pointer;
+        text-align: center;
+        transition: all var(--transition-base);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .export-option:hover {
+        border-color: var(--border-accent);
+        background: var(--color-accent-dim);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-sm), var(--shadow-glow);
+    }
+
+    .export-option.selected {
+        border-color: var(--color-accent);
+        background: var(--color-accent-dim);
+        box-shadow: 0 0 0 1px var(--color-accent),
+                    var(--shadow-glow);
+    }
+
+    .export-option-label {
+        font-size: var(--text-lg);
+        font-weight: 700;
+        color: var(--color-text-primary);
+        margin-bottom: 6px;
+    }
+
+    .export-option-desc {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }
+
+    .export-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+    }
+
+    .export-btn {
+        padding: 12px 28px;
+        border: none;
+        border-radius: 12px;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all var(--transition-base);
+    }
+
+    .export-btn-cancel {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--color-text-secondary);
+        border: 1px solid var(--border-medium);
+    }
+
+    .export-btn-cancel:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--color-text-primary);
+        border-color: var(--border-accent);
+    }
+
+    .export-btn-primary {
+        background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+        color: var(--color-bg);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .export-btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md), var(--shadow-glow);
+    }
+
+    .export-encrypt-section {
+        margin-top: 16px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+    }
+
+    .export-encrypt-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .export-password-input {
+        width: 100%;
+        margin-top: 12px;
+        padding: 10px 14px;
+        background: var(--color-bg);
+        border: 1px solid var(--border-medium);
+        border-radius: 8px;
+        color: var(--color-text-primary);
+        font-size: var(--text-sm);
+        font-family: inherit;
+        outline: none;
+        transition: border-color var(--transition-fast);
+    }
+
+    .export-password-input:focus {
+        border-color: var(--color-accent);
+    }
+
+    .export-encrypt-hint {
+        margin-top: 8px;
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }
+
+    .export-encrypt-modes {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+    .export-encrypt-mode {
+        flex: 1;
+        padding: 10px 12px;
+        background: var(--color-bg);
+        border: 1px solid var(--border-medium);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        text-align: center;
+    }
+
+    .export-encrypt-mode:hover {
+        border-color: var(--color-accent);
+    }
+
+    .export-encrypt-mode.selected {
+        border-color: var(--color-accent);
+        background: rgba(0, 229, 160, 0.08);
+    }
+
+    .export-encrypt-mode input[type="radio"] {
+        display: none;
+    }
+
+    .export-encrypt-mode-label {
+        display: block;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .export-encrypt-mode-desc {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+        margin-top: 2px;
+    }
+
+    /* ========================================
+       Widget Settings Panel
+       ======================================== */
+    .widget-settings-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.85);
+        backdrop-filter: blur(8px);
+        z-index: 3000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn var(--transition-base);
+    }
+    .widget-settings-overlay.active {
+        display: flex;
+    }
+    .widget-settings-panel {
+        background: var(--color-bg-elevated);
+        border: 1px solid var(--border-medium);
+        border-radius: 20px;
+        width: 560px;
+        max-width: 95vw;
+        max-height: 85vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: var(--shadow-lg);
+        animation: dialogSlideUp var(--transition-slow);
+    }
+    .ws-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 24px 16px;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+    .ws-header h2 {
+        font-size: var(--text-xl);
+        font-weight: 700;
+        color: var(--color-accent);
+        margin: 0;
+    }
+    .ws-header-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    .ws-btn {
+        padding: 8px 16px;
+        border: 1px solid var(--border-medium);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.04);
+        color: var(--color-text-secondary);
+        font-size: var(--text-sm);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+    .ws-btn:hover {
+        background: var(--color-accent-dim);
+        border-color: var(--border-accent);
+        color: var(--color-accent);
+    }
+    .ws-btn-primary {
+        background: var(--color-accent);
+        color: var(--color-bg);
+        border-color: var(--color-accent);
+        font-weight: 600;
+    }
+    .ws-btn-primary:hover {
+        background: var(--color-accent-hover);
+    }
+    .ws-close {
+        width: 36px; height: 36px;
+        background: none;
+        border: 1px solid var(--border-medium);
+        border-radius: 10px;
+        color: var(--color-text-tertiary);
+        font-size: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all var(--transition-fast);
+    }
+    .ws-close:hover {
+        color: var(--color-error);
+        border-color: var(--color-error);
+        background: rgba(255,107,107,0.1);
+    }
+    .ws-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 24px;
+    }
+    .ws-body::-webkit-scrollbar {
+        width: 6px;
+    }
+    .ws-body::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .ws-body::-webkit-scrollbar-thumb {
+        background: var(--color-accent);
+        border-radius: 8px;
+    }
+    .ws-category {
+        margin-bottom: 16px;
+    }
+    .ws-category-title {
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--color-accent);
+        font-weight: 600;
+        margin-bottom: 8px;
+        padding: 0 4px;
+    }
+    .ws-widget-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid transparent;
+        border-radius: 12px;
+        margin-bottom: 6px;
+        cursor: grab;
+        transition: all var(--transition-fast);
+        user-select: none;
+    }
+    .ws-widget-item:active {
+        cursor: grabbing;
+    }
+    .ws-widget-item:hover {
+        background: rgba(255,255,255,0.06);
+        border-color: var(--border-medium);
+    }
+    .ws-widget-item.dragging {
+        opacity: 0.5;
+        border-color: var(--color-accent);
+        background: var(--color-accent-dim);
+    }
+    .ws-widget-item.drag-over {
+        border-top: 2px solid var(--color-accent);
+    }
+    .ws-drag-handle {
+        color: var(--color-text-tertiary);
+        font-size: 16px;
+        flex-shrink: 0;
+        cursor: grab;
+    }
+    .ws-widget-info {
+        flex: 1;
+        min-width: 0;
+    }
+    .ws-widget-name {
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .ws-widget-desc {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+        margin-top: 2px;
+    }
+    .ws-toggle {
+        position: relative;
+        width: 40px;
+        height: 22px;
+        flex-shrink: 0;
+    }
+    .ws-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .ws-toggle-slider {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(255,255,255,0.1);
+        border-radius: 11px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+    .ws-toggle-slider::before {
+        content: '';
+        position: absolute;
+        width: 16px; height: 16px;
+        left: 3px; bottom: 3px;
+        background: var(--color-text-tertiary);
+        border-radius: 50%;
+        transition: all var(--transition-fast);
+    }
+    .ws-toggle input:checked + .ws-toggle-slider {
+        background: var(--color-accent-dim);
+    }
+    .ws-toggle input:checked + .ws-toggle-slider::before {
+        transform: translateX(18px);
+        background: var(--color-accent);
+    }
+    .ws-footer {
+        padding: 16px 24px;
+        border-top: 1px solid var(--border-subtle);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .ws-footer-hint {
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+        .skeleton-loader {
+            animation: none;
+        }
+    }
+
+    .offline-banner {
+        background: var(--color-error, #FF6B6B);
+        color: white;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-radius: 12px;
+        margin-bottom: 16px;
+        max-width: 1600px;
+        margin-left: auto;
+        margin-right: auto;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        box-shadow: var(--shadow-md);
+    }
+    .offline-banner .spinner {
+        width: 16px;
+        height: 16px;
+        border-width: 2px;
+        border-top-color: white;
+    }
+</style>
+</head>
+<body>
+<!-- Skip Link for Keyboard Navigation -->
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<!-- Toast Container for Notifications -->
+<div class="toast-container" id="toastContainer" role="alert" aria-live="polite"></div>
+
+<!-- Widget Settings Panel -->
+<div class="widget-settings-overlay" id="widgetSettingsOverlay" onclick="if(event.target===this)closeWidgetSettings()">
+    <div class="widget-settings-panel">
+        <div class="ws-header">
+            <h2>Customize Widgets</h2>
+            <div class="ws-header-actions">
+                <button class="ws-btn" onclick="resetWidgetLayout()">Reset Default</button>
+                <button class="ws-close" onclick="closeWidgetSettings()" aria-label="Close">&times;</button>
+            </div>
+        </div>
+        <div class="ws-body" id="wsBody">
+            <p style="color: var(--color-text-tertiary); text-align: center; padding: 40px 0;">Loading widgets...</p>
+        </div>
+        <div class="ws-footer">
+            <span class="ws-footer-hint">Drag to reorder. Toggle to show/hide.</span>
+            <button class="ws-btn ws-btn-primary" onclick="saveWidgetLayout()">Save &amp; Apply</button>
+        </div>
+    </div>
+</div>
+
+<!-- Export Format Dialog -->
+<div id="exportDialog" class="export-dialog" role="dialog" aria-modal="true" aria-labelledby="exportTitle" style="display: none;">
+    <div class="export-overlay" onclick="closeExportDialog()"></div>
+    <div class="export-content">
+        <h2 id="exportTitle" class="export-title">Choose Export Format</h2>
+        <p class="export-message">Select the format for your data export:</p>
+        <div class="export-options" role="radiogroup" aria-label="Export format options">
+            <div class="export-option selected" onclick="selectExportFormat('csv')" role="radio" aria-checked="true" tabindex="0">
+                <div class="export-option-label">CSV</div>
+                <div class="export-option-desc">Excel-compatible spreadsheet</div>
+            </div>
+            <div class="export-option" onclick="selectExportFormat('json')" role="radio" aria-checked="false" tabindex="0">
+                <div class="export-option-label">JSON</div>
+                <div class="export-option-desc">For programming & APIs</div>
+            </div>
+        </div>
+        <div class="export-encrypt-section">
+            <div class="export-encrypt-header">
+                <span>Encrypt export</span>
+                <label class="ws-toggle">
+                    <input type="checkbox" id="encryptToggle" onchange="toggleExportEncryption(this.checked)">
+                    <span class="ws-toggle-slider"></span>
+                </label>
+            </div>
+            <div id="encryptModeSection" style="display: none;">
+                <div class="export-encrypt-modes">
+                    <label class="export-encrypt-mode selected" onclick="selectEncryptMode('fleet_key')">
+                        <input type="radio" name="encryptMode" value="fleet_key" checked>
+                        <span class="export-encrypt-mode-label">Fleet Key</span>
+                        <span class="export-encrypt-mode-desc">Decryptable by fleet server</span>
+                    </label>
+                    <label class="export-encrypt-mode" onclick="selectEncryptMode('password')">
+                        <input type="radio" name="encryptMode" value="password">
+                        <span class="export-encrypt-mode-label">Password</span>
+                        <span class="export-encrypt-mode-desc">Requires password to decrypt</span>
+                    </label>
+                </div>
+                <div id="encryptPasswordSection" style="display: none;">
+                    <input type="password" id="encryptPassword" class="export-password-input"
+                           placeholder="Create a password (16+ characters)" minlength="16">
+                    <div class="export-encrypt-hint" id="encryptHintText">Dual-layer encryption: AES-256-GCM + Fleet key wrap. The fleet server needs this password and your agent key to decrypt.</div>
+                </div>
+            </div>
+        </div>
+        <div class="export-actions">
+            <button class="export-btn export-btn-cancel" onclick="closeExportDialog()">Cancel</button>
+            <button class="export-btn export-btn-primary" onclick="confirmExport()">Download</button>
+        </div>
+    </div>
+</div>
+
+<main id="main-content">
+<div class="header-container">
+    <div id="e2eeStatus" class="e2ee-badge">
+        <span id="e2eeIcon" class="e2ee-icon"></span>
+        <span id="e2eeText" class="e2ee-label">Checking...</span>
+    </div>
+    <div class="header-branding">
+        <h1>ATLAS Dashboard</h1>
+        <p class="header-subtitle">Fleet Monitoring &amp; Network Intelligence</p>
+    </div>
+    <button class="hamburger" id="hamburger" onclick="toggleMenu()" aria-label="Open menu" aria-expanded="false" aria-controls="menu">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+    <nav class="menu" id="menu" role="navigation" aria-label="Dashboard menu">
+        <div class="menu-section">
+            <div class="menu-title">Themes</div>
+            <div class="menu-item" onclick="changeTheme('default')">
+                <span>Default</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #00E5A0, #00C890);"></div>
+            </div>
+            <div class="menu-item" onclick="changeTheme('cyberpunk')">
+                <span>Cyberpunk</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #ff00ff, #00ffff);"></div>
+            </div>
+            <div class="menu-item" onclick="changeTheme('ocean')">
+                <span>Ocean</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #0080ff, #00ffff);"></div>
+            </div>
+            <div class="menu-item" onclick="changeTheme('sunset')">
+                <span>Sunset</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #ff6400, #ff0080);"></div>
+            </div>
+            <div class="menu-item" onclick="changeTheme('forest')">
+                <span>Forest</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #00ff64, #008040);"></div>
+            </div>
+            <div class="menu-item" onclick="changeTheme('monochrome')">
+                <span>Monochrome</span>
+                <div class="theme-preview" style="background: linear-gradient(135deg, #ffffff, #666666);"></div>
+            </div>
+        </div>
+        <div class="menu-section">
+            <div class="menu-title">Options</div>
+            <div class="menu-item" onclick="toggleFullscreen()">
+                <span>Fullscreen</span>
+                <span style="font-size: 18px;">⛶</span>
+            </div>
+            <div class="menu-item" onclick="refreshAll()">
+                <span>Refresh All</span>
+                <span style="font-size: 18px;">↻</span>
+            </div>
+            <div class="menu-item" onclick="openWidgetSettings()">
+                <span>Customize Widgets</span>
+                <span style="font-size: 18px;">&#9881;</span>
+            </div>
+            <div class="menu-item has-submenu" onmouseenter="showSubmenu('exportSubmenu')" onmouseleave="hideSubmenu('exportSubmenu')">
+                <span>Export Data</span>
+                <span style="font-size: 18px;">⬇</span>
+                <div class="submenu" id="exportSubmenu">
+                    <div class="menu-section">
+                        <div class="menu-title">Speed Tests</div>
+                        <div class="menu-item" onclick="exportData('speedtest', 1)">
+                            <span>Last 1 Hour</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('speedtest', 24)">
+                            <span>Last 24 Hours</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('speedtest', null)">
+                            <span>All Data</span>
+                        </div>
+                    </div>
+                    <div class="menu-section">
+                        <div class="menu-title">Ping Tests</div>
+                        <div class="menu-item" onclick="exportData('ping', 1)">
+                            <span>Last 1 Hour</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('ping', 24)">
+                            <span>Last 24 Hours</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('ping', null)">
+                            <span>All Data</span>
+                        </div>
+                    </div>
+                    <div class="menu-section">
+                        <div class="menu-title">WiFi Quality</div>
+                        <div class="menu-item" onclick="exportData('wifi', 1)">
+                            <span>Last 1 Hour</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('wifi', 24)">
+                            <span>Last 24 Hours</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('wifi', null)">
+                            <span>All Data</span>
+                        </div>
+                    </div>
+                    <div class="menu-section">
+                        <div class="menu-title">WiFi Events</div>
+                        <div class="menu-item" onclick="exportData('wifi-events', 1)">
+                            <span>Last 1 Hour</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('wifi-events', 24)">
+                            <span>Last 24 Hours</span>
+                        </div>
+                        <div class="menu-item" onclick="exportData('wifi-events', null)">
+                            <span>All Data</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="status-bar" id="statusBar" role="status" aria-label="System metrics">
+    <div class="status-metric">
+        <span class="status-dot" id="statusDot"></span>
+        <span>Agent</span>
+        <span class="status-value" id="statusUptime">--</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>CPU</span>
+        <span class="status-value" id="statusCpu">--%</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Memory</span>
+        <span class="status-value" id="statusMem">--%</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Network</span>
+        <span class="status-value" id="statusNet">-- Mbps</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-metric">
+        <span>Widgets</span>
+        <span class="status-value" id="statusWidgets">0</span>
+    </div>
+</div>
+
+<div id="offlineBanner" class="offline-banner" role="alert" aria-live="assertive" style="display: none;">
+    <span>&#9888;</span>
+    <span>Connection to agent lost. Attempting to reconnect...</span>
+    <div class="spinner"></div>
+</div>
+
+<div class="dashboard" id="dashboardGrid">
+$widget_iframes
+</div>
+
+<footer class="info footer-urls" role="contentinfo">
+    <details>
+        <summary class="footer-summary">
+            <h3 class="footer-title">Widget URLs</h3>
+            <span class="footer-hint">Click to expand</span>
+        </summary>
+        <div class="footer-grid">
+            <div>
+                <h3 class="footer-section-title">System</h3>
+                <p><code>/widget/system-monitor</code></p>
+                <p><code>/widget/processes</code></p>
+                <p><code>/widget/system-health</code></p>
+            </div>
+            <div>
+                <h3 class="footer-section-title">Network</h3>
+                <p><code>/widget/wifi</code></p>
+                <p><code>/widget/wifi-analyzer</code></p>
+                <p><code>/widget/speedtest</code></p>
+                <p><code>/widget/wifi-roaming</code></p>
+                <p><code>/widget/network-analysis</code></p>
+            </div>
+            <div>
+                <h3 class="footer-section-title">Enterprise</h3>
+                <p><code>/widget/voip-quality</code></p>
+                <p><code>/widget/connection-rate</code></p>
+                <p><code>/widget/throughput</code></p>
+                <p><code>/widget/osi-layers</code></p>
+            </div>
+            <div>
+                <h3 class="footer-section-title">Services &amp; Hardware</h3>
+                <p><code>/widget/vpn-status</code></p>
+                <p><code>/widget/saas-health</code></p>
+                <p><code>/widget/network-quality</code></p>
+                <p><code>/widget/security-dashboard</code></p>
+                <p><code>/widget/power</code></p>
+                <p><code>/widget/display</code></p>
+                <p><code>/widget/peripherals</code></p>
+                <p><code>/widget/disk-health</code></p>
+            </div>
+        </div>
+    </details>
+</footer>
+
+<script>
+    // Live Status Bar Updates
+    async function updateStatusBar() {
+        try {
+            const resp = await fetch('/api/agent/health');
+            const data = await resp.json();
+            const dot = document.getElementById('statusDot');
+            const uptime = document.getElementById('statusUptime');
+            const cpu = document.getElementById('statusCpu');
+            const mem = document.getElementById('statusMem');
+            const net = document.getElementById('statusNet');
+            const widgets = document.getElementById('statusWidgets');
+
+            // Agent status dot
+            dot.className = 'status-dot';
+            if (data.status === 'ok' || data.status === 'healthy') {
+                dot.classList.add(''); // green default
+            } else {
+                dot.classList.add('warn');
+            }
+
+            // Uptime
+            if (data.uptime_seconds) {
+                const hrs = Math.floor(data.uptime_seconds / 3600);
+                const mins = Math.floor((data.uptime_seconds % 3600) / 60);
+                uptime.textContent = hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm';
+            } else {
+                uptime.textContent = 'Online';
+            }
+
+            // CPU & Memory (from system data)
+            if (data.cpu_percent !== undefined) {
+                cpu.textContent = data.cpu_percent.toFixed(0) + '%';
+            }
+            if (data.memory_percent !== undefined) {
+                mem.textContent = data.memory_percent.toFixed(0) + '%';
+            }
+
+            // Network (if available)
+            if (data.network_mbps !== undefined) {
+                net.textContent = data.network_mbps.toFixed(1) + ' Mbps';
+            }
+
+            // Widget count
+            widgets.textContent = document.querySelectorAll('.dashboard iframe').length;
+        } catch (e) {
+            document.getElementById('statusDot').className = 'status-dot error';
+            document.getElementById('statusUptime').textContent = 'Offline';
+        }
+    }
+    updateStatusBar();
+    setInterval(updateStatusBar, 10000);
+
+    // E2EE Status Update
+    async function updateE2EEStatus() {
+        try {
+            const response = await fetch('/api/agent/health');
+            const data = await response.json();
+            const e2ee = data.e2ee || {};
+            
+            const icon = document.getElementById('e2eeIcon');
+            const text = document.getElementById('e2eeText');
+            const container = document.getElementById('e2eeStatus');
+            
+            if (e2ee.status === 'encrypted') {
+                icon.textContent = '';
+                text.innerHTML = '<span style="color: var(--color-accent);">E2EE Active</span><br><small style="color: var(--color-text-tertiary);">Server verified</small>';
+                container.style.borderColor = 'var(--color-accent)';
+            } else if (e2ee.status === 'enabled_unverified') {
+                icon.textContent = '';
+                text.innerHTML = '<span style="color: var(--color-warning);">E2EE Enabled</span><br><small style="color: var(--color-text-tertiary);">Awaiting verification</small>';
+                container.style.borderColor = 'var(--color-warning)';
+            } else {
+                icon.textContent = '';
+                text.innerHTML = '<span style="color: var(--color-error);">Not Encrypted</span><br><small style="color: var(--color-text-tertiary);">Plaintext</small>';
+                container.style.borderColor = 'var(--color-error)';
+            }
+        } catch (e) {
+            console.error('Error updating E2EE status:', e);
+        }
+    }
+    
+    // Check E2EE status on load and every 30 seconds
+    updateE2EEStatus();
+    setInterval(updateE2EEStatus, 30000);
+    
+    function toggleMenu() {
+        const menu = document.getElementById('menu');
+        const hamburger = document.getElementById('hamburger');
+        const isOpen = menu.classList.toggle('active');
+        hamburger.classList.toggle('active');
+        // Update ARIA states
+        hamburger.setAttribute('aria-expanded', isOpen);
+        hamburger.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
+    }
+    
+    function showSubmenu(submenuId) {
+        const submenu = document.getElementById(submenuId);
+        if (submenu) {
+            submenu.classList.add('active');
+        }
+    }
+    
+    function hideSubmenu(submenuId) {
+        const submenu = document.getElementById(submenuId);
+        if (submenu) {
+            submenu.classList.remove('active');
+        }
+    }
+    
+    function changeTheme(theme) {
+        const themes = {
+            'default': {
+                accent: '#00E5A0',
+                accentHover: '#00C890',
+                bg: '#0c0c14',
+                bgElevated: '#161620',
+                secondary: '#00C8FF'
+            },
+            'cyberpunk': {
+                accent: '#ff00ff',
+                accentHover: '#cc00cc',
+                bg: '#0a0a14',
+                bgElevated: '#14141e',
+                secondary: '#00ffff'
+            },
+            'ocean': {
+                accent: '#0080ff',
+                accentHover: '#0060cc',
+                bg: '#060c18',
+                bgElevated: '#0c1428',
+                secondary: '#00ffff'
+            },
+            'sunset': {
+                accent: '#ff6400',
+                accentHover: '#e05800',
+                bg: '#140a06',
+                bgElevated: '#1e120a',
+                secondary: '#ff0080'
+            },
+            'forest': {
+                accent: '#00ff64',
+                accentHover: '#00cc50',
+                bg: '#060e06',
+                bgElevated: '#0c180c',
+                secondary: '#008040'
+            },
+            'monochrome': {
+                accent: '#e0e0e0',
+                accentHover: '#c0c0c0',
+                bg: '#0a0a0a',
+                bgElevated: '#141414',
+                secondary: '#888888'
+            }
+        };
+
+        const t = themes[theme];
+        if (t) {
+            const r = document.documentElement.style;
+            r.setProperty('--color-accent', t.accent);
+            r.setProperty('--color-accent-hover', t.accentHover);
+            r.setProperty('--color-bg', t.bg);
+            r.setProperty('--color-bg-elevated', t.bgElevated);
+            r.setProperty('--color-secondary', t.secondary);
+            r.setProperty('--color-accent-dim', t.accent + '1f');
+            r.setProperty('--border-accent', t.accent + '59');
+
+            // Update menu items
+            document.querySelectorAll('.menu-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.menu-item').classList.add('active');
+
+            localStorage.setItem('dashboardTheme', theme);
+            toggleMenu();
+        }
+    }
+    
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen();
+        } else {
+            document.exitFullscreen();
+        }
+        toggleMenu();
+    }
+    
+    function refreshAll() {
+        document.querySelectorAll('iframe').forEach(iframe => {
+            iframe.src = iframe.src;
+        });
+        toggleMenu();
+    }
+    
+    // Toast Notification System
+    const ToastManager = {
+        container: null,
+        init() {
+            if (!this.container) {
+                this.container = document.getElementById('toastContainer');
+            }
+        },
+        show(message, type = 'success', duration = 3000) {
+            this.init();
+            const icons = {
+                success: '&#10003;',
+                error: '&#10007;',
+                warning: '&#9888;',
+                info: '&#8505;'
+            };
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" aria-label="Close notification">&times;</button>
+            `;
+            const closeBtn = toast.querySelector('.toast-close');
+            closeBtn.addEventListener('click', () => this.dismiss(toast));
+            this.container.appendChild(toast);
+            setTimeout(() => this.dismiss(toast), duration);
+            return toast;
+        },
+        dismiss(toast) {
+            if (toast && toast.parentNode) {
+                toast.style.animation = 'fadeOut 0.3s ease forwards';
+                setTimeout(() => toast.remove(), 300);
+            }
+        },
+        success(message) { return this.show(message, 'success'); },
+        error(message) { return this.show(message, 'error', 5000); },
+        warning(message) { return this.show(message, 'warning', 4000); },
+        info(message) { return this.show(message, 'info'); }
+    };
+
+    // Export Dialog State
+    let pendingExport = { dataType: null, hours: null };
+    let selectedFormat = 'csv';
+    let selectedEncryptMode = 'fleet_key';
+
+    function toggleExportEncryption(enabled) {
+        document.getElementById('encryptModeSection').style.display = enabled ? 'block' : 'none';
+        if (enabled) selectEncryptMode('fleet_key');
+    }
+
+    function selectEncryptMode(mode) {
+        selectedEncryptMode = mode;
+        document.querySelectorAll('.export-encrypt-mode').forEach(el => {
+            const isSelected = el.querySelector('input').value === mode;
+            el.classList.toggle('selected', isSelected);
+            el.querySelector('input').checked = isSelected;
+        });
+        document.getElementById('encryptPasswordSection').style.display = 'block';
+        const pwInput = document.getElementById('encryptPassword');
+        const hintText = document.getElementById('encryptHintText');
+        if (mode === 'fleet_key') {
+            pwInput.placeholder = 'Create a password (16+ characters)';
+            pwInput.minLength = 16;
+            hintText.textContent = 'Dual-layer encryption: AES-256-GCM + Fleet key wrap. The fleet server needs this password and your agent key to decrypt.';
+        } else {
+            pwInput.placeholder = 'Enter encryption password';
+            pwInput.minLength = 4;
+            hintText.textContent = 'AES-256-GCM encrypted. You will need this password to decrypt the file.';
+        }
+        pwInput.focus();
+    }
+
+    function exportData(dataType, hours) {
+        // Store pending export data and show format dialog
+        pendingExport = { dataType, hours };
+        selectedFormat = 'csv';
+
+        // Reset encryption toggle
+        document.getElementById('encryptToggle').checked = false;
+        document.getElementById('encryptModeSection').style.display = 'none';
+        document.getElementById('encryptPasswordSection').style.display = 'none';
+        document.getElementById('encryptPassword').value = '';
+        selectedEncryptMode = 'fleet_key';
+
+        // Reset selection UI
+        document.querySelectorAll('.export-option').forEach((opt, i) => {
+            if (i === 0) {
+                opt.classList.add('selected');
+                opt.setAttribute('aria-checked', 'true');
+            } else {
+                opt.classList.remove('selected');
+                opt.setAttribute('aria-checked', 'false');
+            }
+        });
+
+        document.getElementById('exportDialog').style.display = 'flex';
+        // Focus first option for accessibility
+        document.querySelector('.export-option').focus();
+        toggleMenu();
+    }
+
+    function selectExportFormat(format) {
+        selectedFormat = format;
+        document.querySelectorAll('.export-option').forEach(opt => {
+            const isSelected = opt.querySelector('.export-option-label').textContent.toLowerCase() === format;
+            opt.classList.toggle('selected', isSelected);
+            opt.setAttribute('aria-checked', isSelected);
+        });
+    }
+
+    function closeExportDialog() {
+        document.getElementById('exportDialog').style.display = 'none';
+        pendingExport = { dataType: null, hours: null };
+    }
+
+    function confirmExport() {
+        const { dataType, hours } = pendingExport;
+
+        if (!dataType) {
+            ToastManager.error('No export data type selected');
+            closeExportDialog();
+            return;
+        }
+
+        // Build URL based on data type
+        let url;
+        switch(dataType) {
+            case 'speedtest':
+                url = '/api/speedtest/export';
+                break;
+            case 'ping':
+                url = '/api/ping/export';
+                break;
+            case 'wifi':
+                url = '/api/wifi/export';
+                break;
+            case 'wifi-events':
+                url = '/api/wifi/events/export';
+                break;
+            default:
+                ToastManager.error('Unknown data type: ' + dataType);
+                closeExportDialog();
+                return;
+        }
+
+        // Add query parameters
+        const params = [];
+        if (hours) {
+            params.push('hours=' + hours);
+        }
+        params.push('format=' + selectedFormat);
+
+        if (params.length > 0) {
+            url += '?' + params.join('&');
+        }
+
+        const encrypt = document.getElementById('encryptToggle').checked;
+
+        if (encrypt) {
+            let fetchBody;
+            let toastMsg;
+
+            if (selectedEncryptMode === 'password') {
+                const password = document.getElementById('encryptPassword').value;
+                if (!password || password.length < 4) {
+                    ToastManager.error('Password must be at least 4 characters');
+                    document.getElementById('encryptPassword').focus();
+                    return;
+                }
+                fetchBody = JSON.stringify({ password: password, mode: 'password' });
+                toastMsg = 'Encrypting and exporting...';
+            } else {
+                const password = document.getElementById('encryptPassword').value;
+                if (!password || password.length < 16) {
+                    ToastManager.error('Password must be at least 16 characters');
+                    document.getElementById('encryptPassword').focus();
+                    return;
+                }
+                fetchBody = JSON.stringify({ password: password, mode: 'fleet_key' });
+                toastMsg = 'Encrypting with fleet key + password...';
+            }
+
+            ToastManager.success(toastMsg);
+            const ext = selectedEncryptMode === 'fleet_key' ? '.fernet.enc' : '.enc';
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: fetchBody
+            })
+            .then(resp => {
+                if (!resp.ok) throw new Error('Export failed: ' + resp.statusText);
+                const disposition = resp.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="?(.+?)"?$/);
+                const filename = match ? match[1] : dataType + '.' + selectedFormat + ext;
+                return resp.blob().then(blob => ({ blob, filename }));
+            })
+            .then(({ blob, filename }) => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+                ToastManager.success('Encrypted export downloaded');
+            })
+            .catch(err => {
+                ToastManager.error(err.message || 'Encrypted export failed');
+            });
+        } else {
+            ToastManager.success('Starting ' + selectedFormat.toUpperCase() + ' export...');
+            window.location.href = url;
+        }
+        closeExportDialog();
+    }
+
+    // Handle keyboard navigation for export dialog
+    document.addEventListener('keydown', function(e) {
+        const dialog = document.getElementById('exportDialog');
+        if (dialog.style.display === 'flex') {
+            if (e.key === 'Escape') {
+                closeExportDialog();
+            } else if (e.key === 'Enter') {
+                confirmExport();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                selectExportFormat(selectedFormat === 'csv' ? 'json' : 'csv');
+            }
+        }
+    });
+    
+    // Close menu when clicking outside
+    document.addEventListener('click', function(event) {
+        const menu = document.getElementById('menu');
+        const hamburger = document.getElementById('hamburger');
+        if (!menu.contains(event.target) && !hamburger.contains(event.target)) {
+            menu.classList.remove('active');
+            hamburger.classList.remove('active');
+        }
+    });
+    
+    // Restore saved theme on load
+    (function restoreTheme() {
+        const saved = localStorage.getItem('dashboardTheme');
+        if (saved && saved !== 'default') {
+            // Simulate theme change without toggleMenu
+            const themes = {
+                'cyberpunk': { accent: '#ff00ff', accentHover: '#cc00cc', bg: '#0a0a14', bgElevated: '#14141e', secondary: '#00ffff' },
+                'ocean': { accent: '#0080ff', accentHover: '#0060cc', bg: '#060c18', bgElevated: '#0c1428', secondary: '#00ffff' },
+                'sunset': { accent: '#ff6400', accentHover: '#e05800', bg: '#140a06', bgElevated: '#1e120a', secondary: '#ff0080' },
+                'forest': { accent: '#00ff64', accentHover: '#00cc50', bg: '#060e06', bgElevated: '#0c180c', secondary: '#008040' },
+                'monochrome': { accent: '#e0e0e0', accentHover: '#c0c0c0', bg: '#0a0a0a', bgElevated: '#141414', secondary: '#888888' }
+            };
+            const t = themes[saved];
+            if (t) {
+                const r = document.documentElement.style;
+                r.setProperty('--color-accent', t.accent);
+                r.setProperty('--color-accent-hover', t.accentHover);
+                r.setProperty('--color-bg', t.bg);
+                r.setProperty('--color-bg-elevated', t.bgElevated);
+                r.setProperty('--color-secondary', t.secondary);
+                r.setProperty('--color-accent-dim', t.accent + '1f');
+                r.setProperty('--border-accent', t.accent + '59');
+            }
+        }
+    })();
+
+    // ========================================
+    // Widget Settings Panel
+    // ========================================
+    let wsWidgets = [];
+    let wsDragItem = null;
+
+    function openWidgetSettings() {
+        toggleMenu();
+        const overlay = document.getElementById('widgetSettingsOverlay');
+        overlay.classList.add('active');
+        loadWidgetList();
+    }
+
+    function closeWidgetSettings() {
+        document.getElementById('widgetSettingsOverlay').classList.remove('active');
+    }
+
+    async function loadWidgetList() {
+        try {
+            const res = await fetch('/api/dashboard/layout');
+            const data = await res.json();
+            wsWidgets = data.widgets || [];
+            renderWidgetList(data.categories || {});
+        } catch (e) {
+            document.getElementById('wsBody').innerHTML =
+                '<p style="color:var(--color-error);text-align:center;padding:40px 0;">Failed to load widget data.</p>';
+        }
+    }
+
+    function renderWidgetList(categories) {
+        const body = document.getElementById('wsBody');
+        // Group widgets by category in their current order
+        const catGroups = {};
+        const catOrder = Object.keys(categories);
+        catOrder.forEach(c => catGroups[c] = []);
+
+        wsWidgets.forEach((w, idx) => {
+            w._idx = idx;
+            const cat = w.category || 'system';
+            if (!catGroups[cat]) catGroups[cat] = [];
+            catGroups[cat].push(w);
+        });
+
+        let html = '';
+        catOrder.forEach(cat => {
+            const items = catGroups[cat];
+            if (!items || items.length === 0) return;
+            html += `<div class="ws-category">`;
+            html += `<div class="ws-category-title">${categories[cat] || cat}</div>`;
+            items.forEach(w => {
+                html += `
+                <div class="ws-widget-item" draggable="true" data-id="${w.id}" data-idx="${w._idx}">
+                    <span class="ws-drag-handle">&#9776;</span>
+                    <div class="ws-widget-info">
+                        <div class="ws-widget-name">${w.name}</div>
+                        <div class="ws-widget-desc">${w.description}</div>
+                    </div>
+                    <label class="ws-toggle">
+                        <input type="checkbox" ${w.visible ? 'checked' : ''} onchange="toggleWidget('${w.id}', this.checked)">
+                        <span class="ws-toggle-slider"></span>
+                    </label>
+                </div>`;
+            });
+            html += `</div>`;
+        });
+
+        body.innerHTML = html;
+        initDragAndDrop();
+    }
+
+    function toggleWidget(id, visible) {
+        const w = wsWidgets.find(x => x.id === id);
+        if (w) w.visible = visible;
+    }
+
+    function initDragAndDrop() {
+        const items = document.querySelectorAll('.ws-widget-item');
+        items.forEach(item => {
+            item.addEventListener('dragstart', e => {
+                wsDragItem = item;
+                item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', item.dataset.id);
+            });
+            item.addEventListener('dragend', () => {
+                item.classList.remove('dragging');
+                document.querySelectorAll('.ws-widget-item').forEach(i => i.classList.remove('drag-over'));
+                wsDragItem = null;
+            });
+            item.addEventListener('dragover', e => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (wsDragItem && wsDragItem !== item) {
+                    item.classList.add('drag-over');
+                }
+            });
+            item.addEventListener('dragleave', () => {
+                item.classList.remove('drag-over');
+            });
+            item.addEventListener('drop', e => {
+                e.preventDefault();
+                item.classList.remove('drag-over');
+                if (!wsDragItem || wsDragItem === item) return;
+                const fromId = wsDragItem.dataset.id;
+                const toId = item.dataset.id;
+                // Reorder wsWidgets
+                const fromIdx = wsWidgets.findIndex(x => x.id === fromId);
+                const toIdx = wsWidgets.findIndex(x => x.id === toId);
+                if (fromIdx >= 0 && toIdx >= 0) {
+                    const [moved] = wsWidgets.splice(fromIdx, 1);
+                    wsWidgets.splice(toIdx, 0, moved);
+                }
+                // Re-render
+                fetch('/api/dashboard/layout').then(r => r.json()).then(data => {
+                    renderWidgetList(data.categories || {});
+                });
+            });
+        });
+    }
+
+    async function saveWidgetLayout() {
+        const order = wsWidgets.map(w => w.id);
+        const hidden = wsWidgets.filter(w => !w.visible).map(w => w.id);
+        try {
+            const res = await fetch('/api/dashboard/layout', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ order, hidden })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeWidgetSettings();
+                ToastManager.success('Widget layout saved. Refreshing...');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                ToastManager.error('Failed to save layout');
+            }
+        } catch (e) {
+            ToastManager.error('Error saving layout: ' + e.message);
+        }
+    }
+
+    async function resetWidgetLayout() {
+        try {
+            const res = await fetch('/api/dashboard/layout/reset', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: '{}'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeWidgetSettings();
+                ToastManager.success('Layout reset to default. Refreshing...');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                ToastManager.error('Failed to reset layout');
+            }
+        } catch (e) {
+            ToastManager.error('Error resetting layout: ' + e.message);
+        }
+    }
+
+    // Close settings on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const overlay = document.getElementById('widgetSettingsOverlay');
+            if (overlay.classList.contains('active')) {
+                closeWidgetSettings();
+                e.stopPropagation();
+            }
+        }
+    });
+
+    // ========================================
+    // Mobile / Desktop Auto-Detection
+    // ========================================
+    const MobileManager = {
+        _isMobile: false,
+        _isTablet: false,
+        _mediaQueryMobile: window.matchMedia('(max-width: 480px)'),
+        _mediaQueryTablet: window.matchMedia('(max-width: 768px)'),
+        _mediaQueryTouch: window.matchMedia('(hover: none) and (pointer: coarse)'),
+
+        init() {
+            // Listen for viewport changes (resize, rotation)
+            this._mediaQueryMobile.addEventListener('change', (e) => this._onMobileChange(e));
+            this._mediaQueryTablet.addEventListener('change', (e) => this._onTabletChange(e));
+
+            // Initial detection
+            this._isMobile = this._mediaQueryMobile.matches;
+            this._isTablet = this._mediaQueryTablet.matches;
+            this._applyMode();
+
+            // Handle orientation changes
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => this._applyMode(), 100);
+            });
+
+            // Touch-specific: close menu on outside tap
+            if (this._mediaQueryTouch.matches) {
+                document.addEventListener('touchstart', (e) => {
+                    const menu = document.getElementById('menu');
+                    const hamburger = document.getElementById('hamburger');
+                    if (menu.classList.contains('active') &&
+                        !menu.contains(e.target) && !hamburger.contains(e.target)) {
+                        menu.classList.remove('active');
+                        hamburger.classList.remove('active');
+                        hamburger.setAttribute('aria-expanded', 'false');
+                    }
+                }, { passive: true });
+            }
+        },
+
+        _onMobileChange(e) {
+            this._isMobile = e.matches;
+            this._applyMode();
+        },
+
+        _onTabletChange(e) {
+            this._isTablet = e.matches;
+            this._applyMode();
+        },
+
+        _applyMode() {
+            const body = document.body;
+            body.classList.toggle('is-mobile', this._isMobile);
+            body.classList.toggle('is-tablet', this._isTablet && !this._isMobile);
+            body.classList.toggle('is-desktop', !this._isTablet);
+            body.classList.toggle('is-touch', this._mediaQueryTouch.matches);
+
+            // On mobile, make submenus visible inline when parent is hovered/active
+            if (this._isTablet) {
+                this._enableInlineSubmenus();
+            } else {
+                this._enableFlyoutSubmenus();
+            }
+        },
+
+        _enableInlineSubmenus() {
+            // On mobile/tablet: submenus show on click, inline
+            document.querySelectorAll('.menu-item.has-submenu').forEach(item => {
+                item.removeAttribute('onmouseenter');
+                item.removeAttribute('onmouseleave');
+                item.onclick = function(e) {
+                    e.stopPropagation();
+                    const sub = this.querySelector('.submenu');
+                    if (sub) {
+                        const isActive = sub.classList.contains('active');
+                        // Close all other submenus first
+                        document.querySelectorAll('.submenu.active').forEach(s => s.classList.remove('active'));
+                        if (!isActive) sub.classList.add('active');
+                    }
+                };
+            });
+        },
+
+        _enableFlyoutSubmenus() {
+            // On desktop: restore hover behavior
+            document.querySelectorAll('.menu-item.has-submenu').forEach(item => {
+                item.setAttribute('onmouseenter', "showSubmenu('" + item.querySelector('.submenu').id + "')");
+                item.setAttribute('onmouseleave', "hideSubmenu('" + item.querySelector('.submenu').id + "')");
+                item.onclick = null;
+            });
+        },
+
+        isMobile() { return this._isMobile; },
+        isTablet() { return this._isTablet; },
+        isTouch() { return this._mediaQueryTouch.matches; }
+    };
+
+    MobileManager.init();
+
+    // Load saved theme
+    const savedTheme = localStorage.getItem('dashboardTheme');
+    if (savedTheme) {
+        // Apply theme without animation on load
+        const themes = {
+            'default': { primary: '#00E5A0', background: '#0a0a0a' },
+            'cyberpunk': { primary: '#ff00ff', background: '#0a0a0a' },
+            'ocean': { primary: '#0080ff', background: '#001a33' },
+            'sunset': { primary: '#ff6400', background: '#1a0a00' },
+            'forest': { primary: '#00ff64', background: '#0a1a0a' },
+            'monochrome': { primary: '#ffffff', background: '#080808' }
+        };
+        const theme = themes[savedTheme];
+        if (theme) {
+            document.body.style.background = theme.background;
+            document.querySelector('h1').style.color = theme.primary;
+        }
+    }
+
+    // Iframe loading overlay dismissal
+    document.querySelectorAll('.widget-iframe-container iframe').forEach(function(iframe) {
+        iframe.addEventListener('load', function() {
+            iframe.closest('.widget-iframe-container').classList.add('iframe-loaded');
+        });
+    });
+
+    // Offline Detection
+    let _wasOffline = false;
+    async function checkAgentConnection() {
+        try {
+            const r = await fetch('/api/agent/health', { signal: AbortSignal.timeout(5000) });
+            if (r.ok) {
+                document.getElementById('offlineBanner').style.display = 'none';
+                if (_wasOffline) {
+                    ToastManager.success('Connection restored');
+                    _wasOffline = false;
+                }
+                return;
+            }
+        } catch (e) { /* offline */ }
+        document.getElementById('offlineBanner').style.display = 'flex';
+        _wasOffline = true;
+    }
+    setInterval(checkAgentConnection, 10000);
+</script>
+</main>
+</body>
+</html>

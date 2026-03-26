@@ -42,6 +42,8 @@ class CSVLogger:
         recent = logger.get_history()
     """
 
+    _cleanup_done: set = set()
+
     def __init__(self,
                  log_file: str,
                  fieldnames: List[str],
@@ -68,7 +70,9 @@ class CSVLogger:
         # Initialize log file and load history
         self._initialize_log_file()
         self._load_recent_history()
-        self._cleanup_old_logs()
+        if self.log_file not in CSVLogger._cleanup_done:
+            self._cleanup_old_logs()
+            CSVLogger._cleanup_done.add(self.log_file)
 
     def _initialize_log_file(self):
         """Initialize CSV log file with headers if it doesn't exist"""

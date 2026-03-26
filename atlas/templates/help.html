@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATLAS Help & Feature Guide</title>
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+        color: #fff;
+        min-height: 100vh;
+        padding: 20px;
+        line-height: 1.6;
+    }
+
+    .container {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+        text-align: center;
+        margin-bottom: 40px;
+        padding: 30px 0;
+    }
+
+    header h1 {
+        font-size: 42px;
+        background: linear-gradient(135deg, #00E5A0, #00C890);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 10px;
+    }
+
+    header p {
+        font-size: 18px;
+        color: #888;
+    }
+
+    .back-link {
+        display: inline-block;
+        margin-bottom: 20px;
+        color: #00E5A0;
+        text-decoration: none;
+        padding: 8px 16px;
+        border: 1px solid rgba(0,255,0,0.3);
+        border-radius: 8px;
+        transition: all 0.3s;
+    }
+
+    .back-link:hover {
+        background: rgba(0,255,0,0.1);
+        border-color: rgba(0,255,0,0.6);
+    }
+
+    /* Table of Contents */
+    .toc {
+        background: rgba(0,255,0,0.05);
+        border: 1px solid rgba(0,255,0,0.2);
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 40px;
+    }
+
+    .toc h2 {
+        color: #00E5A0;
+        margin-bottom: 15px;
+        font-size: 20px;
+    }
+
+    .toc-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px;
+    }
+
+    .toc a {
+        color: #ccc;
+        text-decoration: none;
+        padding: 8px 12px;
+        border-radius: 6px;
+        transition: all 0.2s;
+        display: block;
+    }
+
+    .toc a:hover {
+        background: rgba(0,255,0,0.1);
+        color: #00E5A0;
+    }
+
+    /* Section Styles */
+    .section {
+        margin-bottom: 50px;
+    }
+
+    .section-title {
+        font-size: 28px;
+        color: #00E5A0;
+        margin-bottom: 25px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid rgba(0,255,0,0.3);
+    }
+
+    .subsection-title {
+        font-size: 22px;
+        color: #00C890;
+        margin: 30px 0 20px 0;
+    }
+
+    /* Widget Grid */
+    .widget-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .widget-card {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.3s;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+
+    .widget-card:hover {
+        border-color: rgba(0,255,0,0.5);
+        background: rgba(0,255,0,0.05);
+        transform: translateY(-2px);
+    }
+
+    .widget-card h4 {
+        color: #00E5A0;
+        margin-bottom: 8px;
+        font-size: 18px;
+    }
+
+    .widget-card p {
+        color: #999;
+        font-size: 14px;
+        margin-bottom: 10px;
+    }
+
+    .widget-card code {
+        background: rgba(0,0,0,0.4);
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: #00ffff;
+        font-size: 12px;
+    }
+
+    .widget-category {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+
+    .cat-system { background: rgba(0,200,255,0.2); color: #00c8ff; }
+    .cat-network { background: rgba(0,255,100,0.2); color: #00ff64; }
+    .cat-diagnostic { background: rgba(255,180,0,0.2); color: #ffb400; }
+    .cat-security { background: rgba(255,100,100,0.2); color: #ff6464; }
+    .cat-hardware { background: rgba(200,100,255,0.2); color: #c864ff; }
+
+    /* Feature Highlight */
+    .feature-highlight {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(0,255,0,0.3);
+        border-left: 4px solid #00E5A0;
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 20px;
+    }
+
+    .feature-highlight h3 {
+        color: #00E5A0;
+        font-size: 22px;
+        margin-bottom: 15px;
+    }
+
+    .feature-highlight p {
+        color: #bbb;
+        margin-bottom: 12px;
+    }
+
+    .feature-highlight ul {
+        list-style: none;
+        padding: 0;
+        margin: 15px 0;
+    }
+
+    .feature-highlight li {
+        padding: 8px 0 8px 25px;
+        position: relative;
+        color: #ccc;
+    }
+
+    .feature-highlight li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: #00E5A0;
+        font-weight: bold;
+    }
+
+    /* Action Buttons */
+    .action-button {
+        display: inline-block;
+        margin-top: 10px;
+        margin-right: 10px;
+        padding: 10px 20px;
+        background: linear-gradient(135deg, #00E5A0, #00C890);
+        color: #0a0a0a;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+
+    .action-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(0,255,0,0.4);
+    }
+
+    .action-button.secondary {
+        background: transparent;
+        border: 1px solid rgba(0,255,0,0.5);
+        color: #00E5A0;
+    }
+
+    .action-button.secondary:hover {
+        background: rgba(0,255,0,0.1);
+    }
+
+    /* Quick Start Guide */
+    .quickstart {
+        background: rgba(0,255,0,0.05);
+        border: 2px solid rgba(0,255,0,0.2);
+        border-radius: 12px;
+        padding: 30px;
+        margin-bottom: 40px;
+    }
+
+    .quickstart h2 {
+        color: #00E5A0;
+        margin-bottom: 20px;
+    }
+
+    .quickstart ol {
+        padding-left: 25px;
+        color: #ccc;
+    }
+
+    .quickstart li {
+        margin: 12px 0;
+    }
+
+    .quickstart strong {
+        color: #fff;
+    }
+
+    .quickstart code {
+        background: rgba(0,0,0,0.4);
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: #00ffff;
+        font-size: 13px;
+    }
+
+    /* API Reference */
+    .api-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 15px;
+    }
+
+    .api-item {
+        background: rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 8px;
+        padding: 15px;
+        font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .api-item .method {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        margin-right: 10px;
+    }
+
+    .api-item .method.get { background: rgba(0,200,100,0.3); color: #00ff64; }
+    .api-item .method.post { background: rgba(0,150,255,0.3); color: #00c8ff; }
+
+    .api-item .endpoint {
+        color: #00ffff;
+        font-size: 13px;
+    }
+
+    .api-item .desc {
+        color: #888;
+        font-size: 12px;
+        margin-top: 8px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* Tips Section */
+    .tips-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+    }
+
+    .tip-card {
+        background: rgba(255,180,0,0.05);
+        border: 1px solid rgba(255,180,0,0.2);
+        border-radius: 12px;
+        padding: 20px;
+    }
+
+    .tip-card h4 {
+        color: #ffb400;
+        margin-bottom: 10px;
+    }
+
+    .tip-card p {
+        color: #bbb;
+        font-size: 14px;
+    }
+
+    .tip-card code {
+        background: rgba(0,0,0,0.4);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #00ffff;
+        font-size: 12px;
+    }
+
+    /* Troubleshooting */
+    .troubleshoot-item {
+        background: rgba(255,100,100,0.05);
+        border: 1px solid rgba(255,100,100,0.2);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+
+    .troubleshoot-item h4 {
+        color: #ff6464;
+        margin-bottom: 10px;
+    }
+
+    .troubleshoot-item .solution {
+        color: #00E5A0;
+        margin-top: 10px;
+    }
+
+    .troubleshoot-item p {
+        color: #bbb;
+    }
+
+    /* FAQ Section */
+    details {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        padding: 15px;
+        cursor: pointer;
+    }
+
+    details summary {
+        font-size: 17px;
+        font-weight: 600;
+        color: #fff;
+        list-style: none;
+        position: relative;
+        padding-right: 30px;
+    }
+
+    details summary::after {
+        content: "+";
+        position: absolute;
+        right: 10px;
+        font-size: 24px;
+        color: #00E5A0;
+        transition: transform 0.3s;
+    }
+
+    details[open] summary::after {
+        transform: rotate(45deg);
+    }
+
+    details p, details ul {
+        margin-top: 15px;
+        color: #bbb;
+    }
+
+    details ul {
+        padding-left: 20px;
+    }
+
+    details li {
+        margin: 8px 0;
+    }
+
+    details:hover {
+        border-color: rgba(0,255,0,0.4);
+    }
+
+    /* Footer */
+    footer {
+        margin-top: 60px;
+        padding-top: 30px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        text-align: center;
+        color: #666;
+    }
+
+    footer a {
+        color: #00E5A0;
+        text-decoration: none;
+    }
+
+    footer a:hover {
+        text-decoration: underline;
+    }
+
+    /* Skip Link for Accessibility */
+    .skip-link {
+        position: absolute;
+        top: -100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #00E5A0;
+        color: #111;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: 600;
+        z-index: 10000;
+        transition: top 0.15s ease;
+        text-decoration: none;
+    }
+
+    .skip-link:focus {
+        top: 16px;
+        outline: none;
+    }
+
+    /* Focus States */
+    :focus {
+        outline: none;
+    }
+
+    :focus-visible {
+        outline: 2px solid #00E5A0;
+        outline-offset: 2px;
+    }
+
+    details:focus-visible {
+        outline: 2px solid #00E5A0;
+        outline-offset: 4px;
+    }
+
+    .action-button:focus-visible,
+    .back-link:focus-visible,
+    .widget-card:focus-visible {
+        outline: 2px solid #00E5A0;
+        outline-offset: 2px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .widget-grid, .api-grid, .tips-grid {
+            grid-template-columns: 1fr;
+        }
+        header h1 {
+            font-size: 32px;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+</style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<div class="container">
+    <nav aria-label="Breadcrumb">
+        <a href="/" class="back-link">← Back to Home</a>
+    </nav>
+
+    <header role="banner">
+        <h1>ATLAS Help & Feature Guide</h1>
+        <p>Complete documentation for the Advanced Telemetry & Live Analysis System</p>
+    </header>
+
+    <main id="main-content" role="main">
+
+    <!-- Table of Contents -->
+    <nav class="toc" aria-labelledby="toc-title">
+        <h2 id="toc-title">Quick Navigation</h2>
+        <div class="toc-grid">
+            <a href="#quickstart">Quick Start Guide</a>
+            <a href="#widgets">All Widgets (25+)</a>
+            <a href="#network-analysis">Network Analysis</a>
+            <a href="#api-reference">API Reference</a>
+            <a href="#power-tips">Power User Tips</a>
+            <a href="#troubleshooting">Troubleshooting</a>
+            <a href="#faq">FAQ</a>
+            <a href="#keyboard">Keyboard Shortcuts</a>
+        </div>
+    </nav>
+
+    <!-- Quick Start Guide -->
+    <section id="quickstart" class="quickstart" aria-labelledby="quickstart-title">
+        <h2 id="quickstart-title">Quick Start Guide</h2>
+        <ol>
+            <li>
+                <strong>Dashboard:</strong> Open <code>http://localhost:8767</code> for the main dashboard with real-time widgets.
+            </li>
+            <li>
+                <strong>Menu Bar:</strong> Click the ATLAS icon in your macOS menu bar for quick stats and actions.
+            </li>
+            <li>
+                <strong>Network Issues?</strong> Go to <a href="/widget/network-analysis" style="color: #00E5A0;">Network Analysis</a> for automatic root cause analysis.
+            </li>
+            <li>
+                <strong>Export Data:</strong> Dashboard menu → Export Data → Choose type and time range.
+            </li>
+            <li>
+                <strong>Customize Layout:</strong> Dashboard menu → Customize Dashboard to show/hide widgets.
+            </li>
+            <li>
+                <strong>API Access:</strong> Visit <code>/api/system/comprehensive</code> for JSON metrics.
+            </li>
+        </ol>
+    </section>
+
+    <!-- All Widgets Section -->
+    <section id="widgets" class="section" aria-labelledby="widgets-title">
+        <h2 class="section-title" id="widgets-title">All Widgets</h2>
+        <p style="color: #888; margin-bottom: 25px;">Click any widget to open it. Each widget can be opened in its own window for multi-monitor setups.</p>
+
+        <h3 class="subsection-title">System Monitoring</h3>
+        <div class="widget-grid">
+            <a href="/widget/cpu" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>CPU Monitor</h4>
+                <p>Real-time CPU usage with per-core breakdown and load averages.</p>
+                <code>/widget/cpu</code>
+            </a>
+            <a href="/widget/gpu" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>GPU Monitor</h4>
+                <p>GPU utilization, memory usage, and temperature monitoring.</p>
+                <code>/widget/gpu</code>
+            </a>
+            <a href="/widget/memory" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>Memory Monitor</h4>
+                <p>RAM usage, swap usage, and memory pressure indicators.</p>
+                <code>/widget/memory</code>
+            </a>
+            <a href="/widget/disk" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>Disk Monitor</h4>
+                <p>Disk space usage, I/O rates, and mount point details.</p>
+                <code>/widget/disk</code>
+            </a>
+            <a href="/widget/processes" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>Process Manager</h4>
+                <p>Top processes by CPU/memory with search and kill capability.</p>
+                <code>/widget/processes</code>
+            </a>
+            <a href="/widget/system-health" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>System Health</h4>
+                <p>Overall system health score with component status.</p>
+                <code>/widget/system-health</code>
+            </a>
+            <a href="/widget/system-monitor" class="widget-card">
+                <span class="widget-category cat-system">System</span>
+                <h4>System Monitor</h4>
+                <p>Combined CPU, memory, disk, and network in one view.</p>
+                <code>/widget/system-monitor</code>
+            </a>
+        </div>
+
+        <h3 class="subsection-title">Network Monitoring</h3>
+        <div class="widget-grid">
+            <a href="/widget/network" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>Network I/O</h4>
+                <p>Real-time bandwidth usage, bytes sent/received.</p>
+                <code>/widget/network</code>
+            </a>
+            <a href="/widget/wifi" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>WiFi Status</h4>
+                <p>Signal strength, quality, SSID, channel, and connection details.</p>
+                <code>/widget/wifi</code>
+            </a>
+            <a href="/widget/wifi-analyzer" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>WiFi Analyzer</h4>
+                <p>Channel analysis, nearby networks, interference detection.</p>
+                <code>/widget/wifi-analyzer</code>
+            </a>
+            <a href="/widget/wifi-roaming" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>WiFi Roaming</h4>
+                <p>Access point handoff tracking and roaming event history.</p>
+                <code>/widget/wifi-roaming</code>
+            </a>
+            <a href="/widget/speedtest" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>Speed Test</h4>
+                <p>Download/upload speeds with history and trend analysis.</p>
+                <code>/widget/speedtest</code>
+            </a>
+            <a href="/widget/ping" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>Ping Monitor</h4>
+                <p>Latency monitoring to gateway, DNS, and internet.</p>
+                <code>/widget/ping</code>
+            </a>
+            <a href="/widget/vpn-status" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>VPN Status</h4>
+                <p>VPN connection status and configuration details.</p>
+                <code>/widget/vpn-status</code>
+            </a>
+            <a href="/widget/network-quality" class="widget-card">
+                <span class="widget-category cat-network">Network</span>
+                <h4>Network Quality</h4>
+                <p>Overall network quality score and metrics.</p>
+                <code>/widget/network-quality</code>
+            </a>
+        </div>
+
+        <h3 class="subsection-title">Diagnostic Tools</h3>
+        <div class="widget-grid">
+            <a href="/widget/network-analysis" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Network Analysis</h4>
+                <p>Automatic root cause analysis for network slowdowns. THE power feature.</p>
+                <code>/widget/network-analysis</code>
+            </a>
+            <a href="/widget/speed-correlation" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Speed Correlation</h4>
+                <p>Correlates speed test results with WiFi signal quality.</p>
+                <code>/widget/speed-correlation</code>
+            </a>
+            <a href="/widget/network-path" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Network Path</h4>
+                <p>Visual traceroute showing hops to destination.</p>
+                <code>/widget/network-path</code>
+            </a>
+            <a href="/widget/network-testing" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Network Testing</h4>
+                <p>VoIP quality, throughput, and connection rate testing in one tabbed view.</p>
+                <code>/widget/network-testing</code>
+            </a>
+            <a href="/widget/osi-layers" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>OSI Layers</h4>
+                <p>7-layer network diagnostic showing pass/fail per OSI layer with waterfall blocking.</p>
+                <code>/widget/osi-layers</code>
+            </a>
+            <a href="/widget/alert-rules" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Alert Rules</h4>
+                <p>Create custom alert rules with webhook and email notifications.</p>
+                <code>/widget/alert-rules</code>
+            </a>
+            <a href="/widget/trends" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Trend Visualization</h4>
+                <p>Interactive 7-day charts for CPU, memory, network, and temperature.</p>
+                <code>/widget/trends</code>
+            </a>
+            <a href="/widget/comparison" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Machine Comparison</h4>
+                <p>Compare metrics across multiple machines in your fleet.</p>
+                <code>/widget/comparison</code>
+            </a>
+            <a href="/widget/tools" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>Network Tools</h4>
+                <p>Collection of network diagnostic utilities.</p>
+                <code>/widget/tools</code>
+            </a>
+            <a href="/widget/saas-health" class="widget-card">
+                <span class="widget-category cat-diagnostic">Diagnostic</span>
+                <h4>SaaS Health</h4>
+                <p>Cloud service availability and response times.</p>
+                <code>/widget/saas-health</code>
+            </a>
+        </div>
+
+        <h3 class="subsection-title">Hardware & Security</h3>
+        <div class="widget-grid">
+            <a href="/widget/power" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>Power & Battery</h4>
+                <p>Battery level, charging status, power adapter info.</p>
+                <code>/widget/power</code>
+            </a>
+            <a href="/widget/display" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>Display Info</h4>
+                <p>Connected displays, resolutions, and refresh rates.</p>
+                <code>/widget/display</code>
+            </a>
+            <a href="/widget/peripherals" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>Peripherals</h4>
+                <p>Connected USB devices and peripherals.</p>
+                <code>/widget/peripherals</code>
+            </a>
+            <a href="/widget/disk-health" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>Disk Health</h4>
+                <p>SMART data, disk health status, and predictions.</p>
+                <code>/widget/disk-health</code>
+            </a>
+            <a href="/widget/security-dashboard" class="widget-card">
+                <span class="widget-category cat-security">Security</span>
+                <h4>Security Dashboard</h4>
+                <p>Comprehensive security overview and recommendations.</p>
+                <code>/widget/security-dashboard</code>
+            </a>
+            <a href="/widget/info" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>System Info</h4>
+                <p>macOS version, hardware specs, uptime.</p>
+                <code>/widget/info</code>
+            </a>
+            <a href="/widget/health" class="widget-card">
+                <span class="widget-category cat-hardware">Hardware</span>
+                <h4>Health Overview</h4>
+                <p>Combined health metrics across all components.</p>
+                <code>/widget/health</code>
+            </a>
+        </div>
+    </section>
+
+    <!-- Network Analysis Deep Dive -->
+    <section id="network-analysis" class="section" aria-labelledby="analysis-title">
+        <h2 class="section-title" id="analysis-title">Network Analysis - Deep Dive</h2>
+
+        <article class="feature-highlight">
+            <h3>The Most Powerful Feature in ATLAS</h3>
+            <p>
+                While other monitors just show you that your internet is slow, ATLAS tells you <strong>WHY</strong>.
+                The Network Analysis tool automatically correlates 5 data sources to identify the root cause of slowdowns.
+            </p>
+
+            <h4 style="color: #00C890; margin: 20px 0 10px;">How It Works</h4>
+            <ul>
+                <li><strong>Slowdown Detection:</strong> Identifies periods with 3+ consecutive slow speed tests (below 20 Mbps)</li>
+                <li><strong>Data Correlation:</strong> Analyzes speed tests, WiFi quality, ping tests, network diagnostics, and WiFi events</li>
+                <li><strong>Before/During Comparison:</strong> Compares 15 minutes before vs during the slowdown</li>
+                <li><strong>Trigger Identification:</strong> Highlights events in the 2 minutes before issues started</li>
+                <li><strong>Actionable Recommendations:</strong> Provides specific fixes, not generic advice</li>
+            </ul>
+
+            <h4 style="color: #00C890; margin: 20px 0 10px;">Example Output</h4>
+            <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; font-family: monospace; color: #ccc; margin: 15px 0;">
+                <strong style="color: #ff6464;">Slowdown detected: 8:15 AM - 8:42 AM (27 minutes)</strong><br><br>
+                <strong style="color: #ffb400;">Likely Triggers:</strong><br>
+                &nbsp;&nbsp;• WiFi signal dropped from -55 dBm to -72 dBm<br>
+                &nbsp;&nbsp;• SNR decreased from 45 dB to 23 dB<br>
+                &nbsp;&nbsp;• Disconnect event at 8:14:32<br><br>
+                <strong style="color: #00E5A0;">Recommendations:</strong><br>
+                &nbsp;&nbsp;• Move closer to your WiFi router<br>
+                &nbsp;&nbsp;• Switch to 5GHz band if available<br>
+                &nbsp;&nbsp;• Check for interference sources near router
+            </div>
+
+            <a href="/widget/network-analysis" class="action-button">Open Network Analysis</a>
+            <a href="/api/network/analysis" class="action-button secondary">View via API</a>
+        </article>
+    </section>
+
+    <!-- API Reference -->
+    <section id="api-reference" class="section" aria-labelledby="api-title">
+        <h2 class="section-title" id="api-title">API Reference</h2>
+        <p style="color: #888; margin-bottom: 25px;">All endpoints return JSON. Base URL: <code>http://localhost:8767</code></p>
+
+        <h3 class="subsection-title">System Metrics</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/system/comprehensive</span>
+                <p class="desc">All system metrics in one call (CPU, memory, disk, network, processes)</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/stats</span>
+                <p class="desc">Quick system stats summary</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/system/pressure</span>
+                <p class="desc">Current system pressure (CPU, memory, I/O)</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/pressure/history/{period}</span>
+                <p class="desc">Pressure history (10m, 1h, 24h, 7d)</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/processes</span>
+                <p class="desc">List all processes with CPU/memory usage</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/processes/kill/{pid}</span>
+                <p class="desc">Kill a process by PID</p>
+            </div>
+        </div>
+
+        <h3 class="subsection-title">Network & WiFi</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi</span>
+                <p class="desc">Current WiFi connection details</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/history</span>
+                <p class="desc">WiFi quality history</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/nearby</span>
+                <p class="desc">Nearby WiFi networks scan</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/channels</span>
+                <p class="desc">WiFi channel utilization</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/roaming/events</span>
+                <p class="desc">Access point roaming events</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/ping/stats</span>
+                <p class="desc">Ping statistics (gateway, DNS, internet)</p>
+            </div>
+        </div>
+
+        <h3 class="subsection-title">Speed Tests & Analysis</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/speedtest</span>
+                <p class="desc">Latest speed test result</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/speedtest/history</span>
+                <p class="desc">Speed test history (7 days)</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/speedtest/run</span>
+                <p class="desc">Trigger a new speed test</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/network/analysis</span>
+                <p class="desc">Network slowdown analysis results</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/speed-correlation/analysis</span>
+                <p class="desc">Speed vs WiFi signal correlation</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/traceroute</span>
+                <p class="desc">Network path trace results</p>
+            </div>
+        </div>
+
+        <h3 class="subsection-title">Data Export</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/speedtest/export/{range}</span>
+                <p class="desc">Export speed tests (1h, 24h, all) as CSV</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/ping/export/{range}</span>
+                <p class="desc">Export ping data (1h, 24h, all) as CSV</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/export/{range}</span>
+                <p class="desc">Export WiFi quality (1h, 24h, all) as CSV</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/wifi/events/export/{range}</span>
+                <p class="desc">Export WiFi events (1h, 24h, all) as CSV</p>
+            </div>
+        </div>
+
+        <h3 class="subsection-title">Dashboard & Settings</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/dashboard/layout</span>
+                <p class="desc">Get current dashboard layout</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/dashboard/layout</span>
+                <p class="desc">Save dashboard layout preferences</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/notifications/enable</span>
+                <p class="desc">Enable system notifications</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/wifi/alias/set</span>
+                <p class="desc">Set custom name for a WiFi network</p>
+            </div>
+        </div>
+
+        <h3 class="subsection-title">Alert Rules</h3>
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/alerts/rules</span>
+                <p class="desc">List all alert rules</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/alerts/rules</span>
+                <p class="desc">Create a new alert rule</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/alerts/rules/{id}/update</span>
+                <p class="desc">Update an existing rule</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/alerts/rules/{id}/delete</span>
+                <p class="desc">Delete an alert rule</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/alerts/events</span>
+                <p class="desc">Get alert event history</p>
+            </div>
+            <div class="api-item">
+                <span class="method get">GET</span>
+                <span class="endpoint">/api/alerts/statistics</span>
+                <p class="desc">Get alert statistics (24h)</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/alerts/email-config</span>
+                <p class="desc">Configure email notifications</p>
+            </div>
+            <div class="api-item">
+                <span class="method post">POST</span>
+                <span class="endpoint">/api/alerts/evaluate</span>
+                <p class="desc">Manually evaluate rules against metrics</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Power User Tips -->
+    <section id="power-tips" class="section" aria-labelledby="tips-title">
+        <h2 class="section-title" id="tips-title">Power User Tips</h2>
+
+        <div class="tips-grid">
+            <div class="tip-card">
+                <h4>Multi-Monitor Setup</h4>
+                <p>Open individual widgets in separate browser windows and position them across monitors. Each widget at <code>/widget/...</code> is self-contained.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Custom WiFi Names</h4>
+                <p>Give your networks friendly names via the WiFi widget settings. Names persist across sessions and appear in all widgets.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Kill Runaway Processes</h4>
+                <p>In the Processes widget, search for any process and click the kill button. Works for any process you have permission to terminate.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Customize Dashboard</h4>
+                <p>Use the hamburger menu → Customize Dashboard to show/hide widgets, change sizes, and reorder. Layout persists automatically.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Programmatic Access</h4>
+                <p>Use <code>curl localhost:8767/api/stats</code> to get JSON metrics in scripts. All APIs are unauthenticated for local use.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Speed Test Modes</h4>
+                <p>Switch between automatic (every 5 min), manual, or disabled speed testing via the Speed Test widget settings.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Historical Analysis</h4>
+                <p>Export 7 days of data via the dashboard menu. Open in Excel/Google Sheets for custom analysis and visualization.</p>
+            </div>
+            <div class="tip-card">
+                <h4>Fleet Mode</h4>
+                <p>To report to a fleet server, run <code>python3 update_fleet_config.py</code> and provide your server URL and API key.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Troubleshooting -->
+    <section id="troubleshooting" class="section" aria-labelledby="trouble-title">
+        <h2 class="section-title" id="trouble-title">Troubleshooting</h2>
+
+        <div class="troubleshoot-item">
+            <h4>Dashboard Won't Load</h4>
+            <p>The page at localhost:8767 shows connection refused or timeout.</p>
+            <p class="solution"><strong>Solution:</strong> Check if the agent is running. In Terminal: <code>pgrep -f live_widgets</code>. If not running, start with <code>python3 -m atlas.live_widgets</code></p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>Speed Tests Not Running</h4>
+            <p>Speed test widget shows no data or says "No speed tests yet."</p>
+            <p class="solution"><strong>Solution:</strong> Check speed test mode in widget settings. If set to "Manual", click "Run Speed Test". Also verify internet connectivity.</p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>WiFi Data Missing</h4>
+            <p>WiFi widget shows "No data" or signal strength is N/A.</p>
+            <p class="solution"><strong>Solution:</strong> Ensure you're connected to WiFi (not Ethernet). On macOS, grant Location Services permission to Terminal or the Python app.</p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>High CPU Usage</h4>
+            <p>The ATLAS agent is using excessive CPU resources.</p>
+            <p class="solution"><strong>Solution:</strong> This usually means speed tests are running continuously. Switch to "Automatic" mode (5-min intervals) or "Manual" mode in Speed Test settings.</p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>Network Analysis Shows No Slowdowns</h4>
+            <p>Network Analysis says "No slowdowns detected" even when internet feels slow.</p>
+            <p class="solution"><strong>Solution:</strong> The tool requires 3+ consecutive slow speed tests (below 20 Mbps) to detect a slowdown. Run more speed tests or wait for automatic tests to accumulate.</p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>Widgets Not Updating</h4>
+            <p>Data appears frozen or timestamps are old.</p>
+            <p class="solution"><strong>Solution:</strong> Refresh the page (Cmd+R). If still frozen, check the agent logs at <code>~/Library/Logs/atlas-agent.log</code></p>
+        </div>
+
+        <div class="troubleshoot-item">
+            <h4>Export Downloads Empty File</h4>
+            <p>CSV export downloads but contains no data or just headers.</p>
+            <p class="solution"><strong>Solution:</strong> There may be no data for the selected time range. Try "All Data" instead of "Last 1 Hour". Data is retained for 7 days.</p>
+        </div>
+    </section>
+
+    <!-- Keyboard Shortcuts -->
+    <section id="keyboard" class="section" aria-labelledby="keyboard-title">
+        <h2 class="section-title" id="keyboard-title">Keyboard Shortcuts</h2>
+
+        <div class="api-grid">
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Cmd+R</span>
+                <span class="endpoint" style="color: #fff;">Refresh Dashboard</span>
+            </div>
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Cmd+1-9</span>
+                <span class="endpoint" style="color: #fff;">Quick access to widgets</span>
+            </div>
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Cmd+K</span>
+                <span class="endpoint" style="color: #fff;">Open search in Processes widget</span>
+            </div>
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Esc</span>
+                <span class="endpoint" style="color: #fff;">Close dialogs and menus</span>
+            </div>
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Tab</span>
+                <span class="endpoint" style="color: #fff;">Navigate between elements</span>
+            </div>
+            <div class="api-item">
+                <span class="method get" style="background: rgba(255,255,255,0.1); color: #fff;">Enter</span>
+                <span class="endpoint" style="color: #fff;">Activate focused button/link</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section id="faq" class="section" aria-labelledby="faq-title">
+        <h2 class="section-title" id="faq-title">Frequently Asked Questions</h2>
+
+        <details>
+            <summary>How long is data retained?</summary>
+            <p>ATLAS retains <strong>7 days</strong> of monitoring data locally. Older data is automatically cleaned up. Storage usage is typically 50-100MB.</p>
+        </details>
+
+        <details>
+            <summary>Can I use ATLAS without a fleet server?</summary>
+            <p><strong>Yes!</strong> ATLAS works perfectly in standalone mode. All widgets, dashboards, exports, and analysis features work locally. Fleet mode is optional for managing multiple machines.</p>
+        </details>
+
+        <details>
+            <summary>Is my data sent to any cloud service?</summary>
+            <p><strong>No.</strong> In standalone mode, all data stays on your machine. Nothing is sent externally. In fleet mode, data only goes to YOUR fleet server (which you control).</p>
+        </details>
+
+        <details>
+            <summary>What metrics does ATLAS collect?</summary>
+            <ul>
+                <li><strong>System:</strong> CPU, memory, disk, GPU, processes, battery, temperature</li>
+                <li><strong>Network:</strong> Bandwidth, connections, packets, errors</li>
+                <li><strong>WiFi:</strong> Signal (RSSI), SNR, quality, channel, nearby networks</li>
+                <li><strong>Tests:</strong> Speed tests, ping latency, traceroute, VoIP quality</li>
+                <li><strong>Hardware:</strong> Displays, peripherals, disk health</li>
+                <li><strong>Security:</strong> Firewall, FileVault, SIP, Gatekeeper</li>
+            </ul>
+        </details>
+
+        <details>
+            <summary>How do I customize speed test thresholds?</summary>
+            <p>You can customize thresholds via the <strong>Network Analysis widget settings</strong>:</p>
+            <ol>
+                <li>Open the <a href="/widget/network-analysis">Network Analysis</a> widget</li>
+                <li>Click the <strong>Settings</strong> (⚙️) button</li>
+                <li>Adjust the threshold values:
+                    <ul>
+                        <li><strong>Slow Download:</strong> Default 20 Mbps (set higher for gigabit connections)</li>
+                        <li><strong>Slow Upload:</strong> Default 5 Mbps</li>
+                        <li><strong>High Ping:</strong> Default 100 ms</li>
+                        <li><strong>Consecutive Tests:</strong> Number of slow tests before alerting (default 3)</li>
+                    </ul>
+                </li>
+                <li>Click <strong>Save</strong> to apply</li>
+            </ol>
+            <p>Settings are stored in <code>~/.config/atlas-agent/network_analysis_settings.json</code> and persist across restarts.</p>
+            <p>You can also use the API: <code>POST /api/network/analysis/settings</code> with JSON body.</p>
+        </details>
+
+        <details>
+            <summary>What's the difference between widgets and dashboard?</summary>
+            <p>The <strong>dashboard</strong> shows multiple widgets in a grid layout. Individual <strong>widgets</strong> are standalone pages you can open in separate windows for multi-monitor setups.</p>
+        </details>
+
+        <details>
+            <summary>How do I kill a problematic process?</summary>
+            <p>Go to the Processes widget, search for the process, and click the kill (X) button. You can only kill processes you have permission to terminate.</p>
+        </details>
+
+        <details>
+            <summary>Can I run ATLAS on startup?</summary>
+            <p>Yes! Use the provided launchd plist files (<code>com.atlas.agent.plist</code>) or add ATLAS to your Login Items in System Preferences.</p>
+        </details>
+
+        <details>
+            <summary>How accurate is the Network Analysis tool?</summary>
+            <p>It correlates real data to identify patterns. It excels at detecting WiFi issues, router problems, and ISP issues. It cannot detect issues outside your network or intermittent problems that don't coincide with speed tests.</p>
+        </details>
+
+        <details>
+            <summary>How do I export data for external analysis?</summary>
+            <p>Use the dashboard hamburger menu → Export Data. Choose from Speed Tests, Ping, WiFi Quality, or WiFi Events, with time ranges of 1h, 24h, or all data. CSV files work with Excel, Google Sheets, and pandas.</p>
+        </details>
+
+        <details>
+            <summary>What ports does ATLAS use?</summary>
+            <ul>
+                <li><strong>8767:</strong> Local agent dashboard (this server)</li>
+                <li><strong>8778:</strong> Fleet server (if running in fleet mode)</li>
+            </ul>
+        </details>
+
+        <details>
+            <summary>How do I check agent health?</summary>
+            <p>Visit <code>/api/agent/health</code> for a JSON health check, or <code>/api/health</code> for a simple status. The dashboard also shows agent status in the header.</p>
+        </details>
+    </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer role="contentinfo">
+        <p><strong>Need more help?</strong></p>
+        <nav style="margin-top: 10px;" aria-label="Footer navigation">
+            <a href="/">← Back to Home</a> ·
+            <a href="/dashboard">Dashboard</a> ·
+            <a href="/widget/network-analysis">Network Analysis</a> ·
+            <a href="/api/system/comprehensive">API Explorer</a>
+        </nav>
+        <p style="margin-top: 20px; color: #444;">
+            ATLAS Agent v2.0.0 | Advanced Telemetry & Live Analysis System | All data processed locally
+        </p>
+    </footer>
+</div>
+</body>
+</html>

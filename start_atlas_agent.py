@@ -47,6 +47,12 @@ root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 logger.info(f"Logging to file: {log_file} (7-day retention)")
 
+# Use JSON logging format if requested (for production/log aggregation)
+if os.environ.get('ATLAS_LOG_FORMAT') == 'json':
+    from atlas.json_logger import configure_json_logging
+    configure_json_logging()
+    logger.info("JSON log format enabled")
+
 # Add atlas to path and import AFTER logging is configured
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

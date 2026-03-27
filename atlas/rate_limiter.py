@@ -40,7 +40,7 @@ class RateLimiter:
             self._requests[ip].append(now)
             return True
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Remove stale entries from IPs that haven't made recent requests."""
         now = time.monotonic()
         cutoff = now - self.window_seconds * 2  # Keep 2x window for safety

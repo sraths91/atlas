@@ -133,6 +133,57 @@ def handle_stats(handler):
     handler.serve_json(handler.get_current_stats())
 
 
+@agent_router.route('GET', '/api/health/full')
+def handle_health_full(handler):
+    """Aggregated health of all monitors — one endpoint to check everything."""
+    import time as _time
+    result = {
+        'timestamp': _time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'monitors': {}
+    }
+
+    # Core monitors (always available)
+    monitor_checks = {
+        'wifi': lambda: get_wifi_monitor().get_last_result() is not None,
+        'ping': lambda: _get_ping_monitor().get_last_result() is not None,
+        'speedtest': lambda: _get_speed_test_monitor().get_last_result() is not None,
+    }
+
+    for name, check_fn in monitor_checks.items():
+        try:
+            running = check_fn()
+            result['monitors'][name] = {'status': 'running' if running else 'idle'}
+        except Exception as e:
+            result['monitors'][name] = {'status': 'error', 'error': str(e)}
+
+    # Optional monitors via registry
+    optional = ['display', 'power', 'peripheral', 'security', 'disk', 'software', 'application']
+    for name in optional:
+        mon = get_monitor(name)
+        if mon is None:
+            result['monitors'][name] = {'status': 'unavailable'}
+        else:
+            try:
+                running = hasattr(mon, 'is_running') and mon.is_running()
+                result['monitors'][name] = {'status': 'running' if running else 'available'}
+            except Exception as e:
+                result['monitors'][name] = {'status': 'error', 'error': str(e)}
+
+    # Overall status
+    statuses = [m['status'] for m in result['monitors'].values()]
+    if any(s == 'error' for s in statuses):
+        result['overall'] = 'degraded'
+    elif all(s in ('running', 'available', 'idle') for s in statuses):
+        result['overall'] = 'healthy'
+    else:
+        result['overall'] = 'partial'
+
+    result['monitor_count'] = len(result['monitors'])
+    result['running_count'] = sum(1 for s in statuses if s == 'running')
+
+    handler.serve_json(result)
+
+
 @agent_router.route('GET', '/api/health')
 def handle_health(handler):
     handler.serve_json(get_system_health())

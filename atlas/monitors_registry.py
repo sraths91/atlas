@@ -12,15 +12,16 @@ Usage:
         monitor.start()
 """
 import logging
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 # Lazy-loaded monitor cache: name -> instance or None
-_MONITORS = {}
+_MONITORS: dict[str, Optional[Any]] = {}
 
 # Import functions for each optional monitor.
 # Each returns the singleton getter, so get_monitor() calls it once and caches.
-_IMPORTERS = {
+_IMPORTERS: dict[str, Callable[[], Any]] = {
     'display': lambda: __import__(
         'atlas.display_monitor', fromlist=['get_display_monitor']
     ).get_display_monitor(),
@@ -48,7 +49,7 @@ _IMPORTERS = {
 _NOT_LOADED = object()
 
 
-def get_monitor(name):
+def get_monitor(name: str) -> Optional[Any]:
     """Get an optional monitor by name. Returns the monitor instance or None.
 
     Lazy-loads the module on first access and caches the result. If the module
@@ -85,7 +86,7 @@ def get_monitor(name):
         return None
 
 
-def is_available(name):
+def is_available(name: str) -> bool:
     """Check if a monitor is available (importable and initialized).
 
     Args:

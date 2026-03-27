@@ -93,7 +93,21 @@ def release_singleton_lock():
 
 
 class WebSocketHandler:
-    """Simple WebSocket handler for live data streaming"""
+    """Simple WebSocket handler for live data streaming.
+
+    Limitations (hand-rolled implementation, not a full RFC 6455 client):
+    - Text frames only (opcode 0x1) — no binary frame support
+    - No ping/pong keepalive — stale connections detected only on send failure
+    - No close frame handling — connections dropped on socket error
+    - No message fragmentation — large payloads sent as single frame
+    - No per-message compression (permessage-deflate)
+    - No subprotocol negotiation
+
+    These limitations are acceptable for local dashboard use (localhost).
+    If WebSocket reliability becomes an issue, consider:
+    1. Server-Sent Events (SSE) — simpler, native reconnection, works with BaseHTTPRequestHandler
+    2. The ``websockets`` library — full RFC 6455 compliance
+    """
 
     @staticmethod
     def compute_accept_key(key):

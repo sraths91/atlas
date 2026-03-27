@@ -25,6 +25,7 @@ from atlas.routes.api_routes import (
 )
 
 from atlas.monitors_registry import get_monitor, is_available
+from atlas.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class LiveWidgetHandler(BaseHTTPRequestHandler):
     system_monitor = None
     websocket_clients = []
     _ws_lock = threading.Lock()
+    _rate_limiter = RateLimiter(max_requests=200, window_seconds=60)
 
     # Agent health tracking
     agent_start_time = time.time()
@@ -205,6 +207,17 @@ class LiveWidgetHandler(BaseHTTPRequestHandler):
             if path == '/logout':
                 self._handle_logout()
                 return
+
+            # Rate limiting (skip for health checks and static assets)
+            if not path.startswith('/api/health') and not path == '/favicon.ico':
+                client_ip = self._get_client_ip()
+                if not self._rate_limiter.is_allowed(client_ip):
+                    self.send_response(429)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Retry-After', '60')
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "Too many requests"}')
+                    return
 
             # Check authentication for protected paths
             if not self._check_auth():
@@ -327,6 +340,17 @@ class LiveWidgetHandler(BaseHTTPRequestHandler):
             if path.startswith('/api/auth/'):
                 self._handle_auth_api(path)
                 return
+
+            # Rate limiting
+            if not path.startswith('/api/health'):
+                client_ip = self._get_client_ip()
+                if not self._rate_limiter.is_allowed(client_ip):
+                    self.send_response(429)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Retry-After', '60')
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "Too many requests"}')
+                    return
 
             # Check authentication for other POST requests
             if not self._check_auth():
